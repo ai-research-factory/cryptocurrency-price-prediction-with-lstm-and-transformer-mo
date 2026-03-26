@@ -32,3 +32,9 @@ evaluation:
   test_size: 60
   step_size: 60
   cost_bps: 10.0
+  # Cycle 3: purge gap between train and test to prevent sequence overlap leakage
+  purge_gap: 5
+  # Cycle 3: adaptive window sizing for datasets with few samples
+  adaptive_window: true
+  # Cycle 3: cost sensitivity analysis at multiple levels (basis points)
+  cost_sensitivity_bps: [0.0, 2.0, 5.0, 10.0, 20.0, 50.0]
