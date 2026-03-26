@@ -1,0 +1,6 @@
+[project]
+name = "cryptocurrency-price-prediction-with-lstm-and-transformer-mo"
+version = "0.1.0"
+description = "Cryptocurrency Price Prediction with LSTM and Transformer Models Leveraging Momentum and Volatility Technical Indicators"
+requires-python = ">=3.10"
+dependencies = ["numpy", "pandas", "scikit-learn", "torch", "matplotlib", "tqdm"]
