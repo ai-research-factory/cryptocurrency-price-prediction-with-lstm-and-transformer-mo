@@ -4,6 +4,8 @@ Cycle 4: Added learning rate scheduling (ReduceLROnPlateau).
 Cycle 5: Added classification mode (BCE loss for direction prediction).
 Cycle 7: Added linear warm-up LR scheduling for Transformer convergence.
 Cycle 8: Added early stopping with validation split to reduce overfitting.
+Cycle 9: Fixed early stopping + warmup interaction -- early stopping only
+activates after warmup phase completes.
 """
 
 import logging
@@ -160,8 +162,8 @@ def train_model(
             current_lr = optimizer.param_groups[0]["lr"]
             logger.info(f"Epoch {epoch+1}/{epochs} - Loss: {avg_loss:.6f} - LR: {current_lr:.2e}")
 
-        # Early stopping check
-        if val_loader is not None and early_stopping_patience > 0:
+        # Early stopping check (skip during warmup phase to let LR stabilize)
+        if val_loader is not None and early_stopping_patience > 0 and epoch >= warmup_epochs:
             model.eval()
             val_loss = 0.0
             val_batches = 0

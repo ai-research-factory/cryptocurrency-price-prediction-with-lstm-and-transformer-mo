@@ -18,6 +18,7 @@ from src.evaluation import (
     regime_threshold_sweep,
     select_optimal_regime_threshold,
     select_optimal_hidden_size,
+    select_optimal_num_layers,
 )
 
 
@@ -367,3 +368,30 @@ def test_regime_threshold_sweep_monotonic_shorts():
     # Higher threshold → fewer shorts disabled (monotonically non-increasing)
     for i in range(len(shorts) - 1):
         assert shorts[i] >= shorts[i + 1]
+
+
+# Cycle 9 tests
+
+def test_select_optimal_num_layers():
+    """Should select num_layers with best Sharpe."""
+    sweep_results = [
+        {"num_layers": 1, "sharpe_ratio": 0.3},
+        {"num_layers": 2, "sharpe_ratio": 1.0},
+        {"num_layers": 3, "sharpe_ratio": 0.7},
+    ]
+    assert select_optimal_num_layers(sweep_results) == 2
+
+
+def test_select_optimal_num_layers_with_errors():
+    """Should skip entries with errors."""
+    sweep_results = [
+        {"num_layers": 1, "error": "fail"},
+        {"num_layers": 2, "sharpe_ratio": 0.5},
+        {"num_layers": 3, "sharpe_ratio": 0.8},
+    ]
+    assert select_optimal_num_layers(sweep_results) == 3
+
+
+def test_select_optimal_num_layers_empty():
+    """Should return default when no valid results."""
+    assert select_optimal_num_layers([], default_num_layers=2) == 2

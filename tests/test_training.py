@@ -155,3 +155,21 @@ def test_early_stopping_restores_best():
     # Model should be functional after training (can predict)
     preds = predict(model, test_ds)
     assert len(preds) == len(test_ds)
+
+
+def test_early_stopping_skips_warmup_phase():
+    """Cycle 9: Early stopping should not activate during warmup epochs."""
+    np.random.seed(42)
+    features = np.random.randn(200, 5)
+    targets = np.random.randn(200)
+
+    train_ds, _, _, _ = prepare_data(features, targets, train_end=150, seq_len=10)
+    model = build_model("transformer", input_size=5, d_model=16, nhead=4, num_layers=1)
+
+    # With warmup=5 and patience=3, training should run at least 5 epochs
+    # (early stopping only activates after warmup)
+    losses = train_model(
+        model, train_ds, epochs=50, batch_size=16,
+        warmup_epochs=5, early_stopping_patience=3, val_fraction=0.1,
+    )
+    assert len(losses) >= 5  # must complete warmup before stopping

@@ -9,6 +9,8 @@ Cycle 7: Added per-model-ticker adaptive seq_len, Transformer warm-up scheduling
 additional tickers (SPY, MSFT), volatility-regime short toggling.
 Cycle 8: Added early stopping, ensemble fix, per-ticker regime threshold calibration,
 per-model hidden size search.
+Cycle 9: Added selective ensemble (drop underperforming models), per-model
+num_layers search, fixed early stopping + warmup interaction.
 """
 
 import argparse
@@ -33,6 +35,7 @@ from .evaluation import (
     select_optimal_seq_len, compute_trading_metrics_regime_short,
     regime_threshold_sweep, select_optimal_regime_threshold,
     hidden_size_sweep, select_optimal_hidden_size,
+    num_layers_sweep, select_optimal_num_layers,
 )
 
 logging.basicConfig(
@@ -205,7 +208,7 @@ def _build_ensemble_result(
 
 
 def run_experiment(config: dict) -> dict:
-    """Run full experiment pipeline with Cycle 8 enhancements."""
+    """Run full experiment pipeline with Cycle 9 enhancements."""
     data_cfg = config["data"]
     model_cfg = config["model"]
     train_cfg = config["training"]
@@ -242,6 +245,11 @@ def run_experiment(config: dict) -> dict:
     regime_threshold_levels = eval_cfg.get("regime_threshold_sweep", None)
     hidden_size_levels = eval_cfg.get("hidden_size_sweep", None)
     adaptive_hidden_size = eval_cfg.get("adaptive_hidden_size", False)
+    # Cycle 9: new options
+    num_layers_levels = eval_cfg.get("num_layers_sweep", None)
+    adaptive_num_layers = eval_cfg.get("adaptive_num_layers", False)
+    selective_ensemble = eval_cfg.get("selective_ensemble", False)
+    selective_ensemble_threshold = eval_cfg.get("selective_ensemble_threshold", 0.0)
 
     all_ticker_results = {}
 
@@ -350,6 +358,52 @@ def run_experiment(config: dict) -> dict:
                 model_hidden_sizes[f"{mtype}_sweep"] = hs_sweep
                 logger.info(f"Adaptive hidden_size: selected hidden_size={optimal_hs} for {mtype.upper()} on {ticker}")
 
+        # Cycle 9: Per-model adaptive num_layers selection
+        model_num_layers = {}
+        if adaptive_num_layers and num_layers_levels:
+            for mtype in model_cfg["types"]:
+                logger.info(f"\n{'='*60}")
+                logger.info(f"Adaptive num_layers: sweeping for {mtype.upper()} on {ticker}")
+                logger.info(f"{'='*60}")
+                mkwargs = dict(model_cfg.get(mtype, {}))
+                # Apply adaptive hidden size if already selected
+                if mtype in model_hidden_sizes:
+                    if mtype in ("lstm", "gru"):
+                        mkwargs["hidden_size"] = model_hidden_sizes[mtype]
+                    elif mtype == "transformer":
+                        nhead = mkwargs.get("nhead", 4)
+                        d_model = max(model_hidden_sizes[mtype], nhead)
+                        d_model = d_model - (d_model % nhead)
+                        mkwargs["d_model"] = d_model
+                        mkwargs["dim_feedforward"] = d_model * 2
+                mtype_warmup = warmup_epochs if mtype == "transformer" else 0
+                nl_sweep = num_layers_sweep(
+                    features=features,
+                    targets=targets,
+                    model_type=mtype,
+                    model_kwargs=mkwargs,
+                    num_layers_levels=num_layers_levels,
+                    seq_len=train_cfg.get("seq_len", 30),
+                    train_size=eval_cfg.get("train_size", 500),
+                    test_size=eval_cfg.get("test_size", 60),
+                    step_size=eval_cfg.get("step_size", 60),
+                    epochs=train_cfg.get("epochs", 50),
+                    batch_size=train_cfg.get("batch_size", 32),
+                    lr=train_cfg.get("lr", 1e-3),
+                    cost_bps=eval_cfg.get("cost_bps", 10.0),
+                    purge_gap=purge_gap,
+                    interval=interval,
+                    adaptive_window=adaptive_window,
+                    min_holding_period=ticker_hold,
+                    allow_short=allow_short,
+                    warmup_epochs=mtype_warmup,
+                    early_stopping_patience=early_stopping_patience,
+                )
+                optimal_nl = select_optimal_num_layers(nl_sweep, 2)
+                model_num_layers[mtype] = optimal_nl
+                model_num_layers[f"{mtype}_sweep"] = nl_sweep
+                logger.info(f"Adaptive num_layers: selected num_layers={optimal_nl} for {mtype.upper()} on {ticker}")
+
         # Cycle 7: Per-model-ticker adaptive seq_len selection
         # Phase 1: If adaptive_seq_len, run seq_len sweep first to find optimal per model
         model_seq_lens = {}
@@ -369,6 +423,9 @@ def run_experiment(config: dict) -> dict:
                         d_model = d_model - (d_model % nhead)
                         mkwargs["d_model"] = d_model
                         mkwargs["dim_feedforward"] = d_model * 2
+                # Cycle 9: Apply adaptive num_layers if selected
+                if mtype in model_num_layers:
+                    mkwargs["num_layers"] = model_num_layers[mtype]
                 # Determine warmup for this model type
                 mtype_warmup = warmup_epochs if mtype == "transformer" else 0
                 sl_sweep = seq_len_sensitivity_sweep(
@@ -416,6 +473,10 @@ def run_experiment(config: dict) -> dict:
                     mkwargs["d_model"] = d_model
                     mkwargs["dim_feedforward"] = d_model * 2
                 logger.info(f"  Using adaptive hidden_size={model_hidden_sizes[mtype]} for {mtype.upper()}")
+            # Cycle 9: Apply adaptive num_layers if selected
+            if mtype in model_num_layers:
+                mkwargs["num_layers"] = model_num_layers[mtype]
+                logger.info(f"  Using adaptive num_layers={model_num_layers[mtype]} for {mtype.upper()}")
             # Cycle 7: Use per-model optimal seq_len if adaptive
             mtype_seq_len = model_seq_lens.get(mtype, train_cfg.get("seq_len", 30))
             # Cycle 7: Transformer gets warm-up epochs
@@ -527,6 +588,9 @@ def run_experiment(config: dict) -> dict:
                         d_model = d_model - (d_model % nhead)
                         mkwargs["d_model"] = d_model
                         mkwargs["dim_feedforward"] = d_model * 2
+                # Cycle 9: Apply adaptive num_layers
+                if mtype in model_num_layers:
+                    mkwargs["num_layers"] = model_num_layers[mtype]
                 mtype_seq_len = model_seq_lens.get(mtype, train_cfg.get("seq_len", 30))
                 mtype_warmup = warmup_epochs if mtype == "transformer" else 0
 
@@ -557,6 +621,7 @@ def run_experiment(config: dict) -> dict:
                 model_results[f"{mtype}_cls"] = result
 
         # Cycle 5/6: Ensemble models (both equal and inverse-variance)
+        # Cycle 9: Added selective ensemble that drops underperforming models
         if run_ensemble and len(model_cfg["types"]) >= 2:
             for method in ["equal", "inverse_variance"]:
                 logger.info(f"\n{'='*60}")
@@ -576,6 +641,47 @@ def run_experiment(config: dict) -> dict:
                                 f"{ensemble_result['aggregate']['sharpe_ratio']:.4f}")
                 else:
                     logger.warning(f"Could not build {method} ensemble")
+
+            # Cycle 9: Selective ensemble - drop models with Sharpe below threshold
+            if selective_ensemble:
+                for method in ["equal", "inverse_variance"]:
+                    logger.info(f"\n{'='*60}")
+                    logger.info(f"Building SELECTIVE ENSEMBLE ({method}) for {ticker} "
+                                f"(threshold={selective_ensemble_threshold})")
+                    logger.info(f"{'='*60}")
+                    # Filter to models with Sharpe above threshold
+                    selected_results = {}
+                    for m in model_cfg["types"]:
+                        if m not in model_results or "error" in model_results[m]:
+                            continue
+                        model_sharpe = model_results[m]["aggregate"]["sharpe_ratio"]
+                        if model_sharpe >= selective_ensemble_threshold:
+                            selected_results[m] = model_results[m]
+                            logger.info(f"  Including {m.upper()} (Sharpe={model_sharpe:.4f})")
+                        else:
+                            logger.info(f"  Excluding {m.upper()} (Sharpe={model_sharpe:.4f} < {selective_ensemble_threshold})")
+
+                    if len(selected_results) >= 2:
+                        sel_ensemble = _build_ensemble_result(
+                            selected_results, features, targets, eval_cfg, interval,
+                            cost_sensitivity_levels, ticker_hold,
+                            allow_short=allow_short, classification=False,
+                            ensemble_method=method,
+                        )
+                        if sel_ensemble is not None:
+                            sel_ensemble["selective"] = True
+                            sel_ensemble["excluded_models"] = [
+                                m for m in model_cfg["types"]
+                                if m not in selected_results and m in model_results
+                            ]
+                            model_results[f"selective_ensemble_{method}"] = sel_ensemble
+                            logger.info(f"Selective ensemble ({method}) Sharpe: "
+                                        f"{sel_ensemble['aggregate']['sharpe_ratio']:.4f}")
+                    elif len(selected_results) == 1:
+                        logger.info(f"Selective ensemble ({method}): only 1 model above threshold, "
+                                    f"skipping (use individual model)")
+                    else:
+                        logger.info(f"Selective ensemble ({method}): no models above threshold")
 
         # Cycle 4: Feature importance analysis (skip in Cycle 5 to save time)
         feat_importance = {}
@@ -611,6 +717,10 @@ def run_experiment(config: dict) -> dict:
         adaptive_hidden_sizes = {m: hs for m, hs in model_hidden_sizes.items()
                                   if not m.endswith("_sweep")} if model_hidden_sizes else None
 
+        # Cycle 9: Collect per-model adaptive num_layers selections
+        adaptive_num_layers_map = {m: nl for m, nl in model_num_layers.items()
+                                    if not m.endswith("_sweep")} if model_num_layers else None
+
         all_ticker_results[ticker] = {
             "n_samples": len(combined),
             "n_features": len(feature_cols),
@@ -621,6 +731,7 @@ def run_experiment(config: dict) -> dict:
             "adaptive_hold_period": ticker_hold if adaptive_hold else None,
             "adaptive_seq_lens": adaptive_seq_lens,
             "adaptive_hidden_sizes": adaptive_hidden_sizes,
+            "adaptive_num_layers": adaptive_num_layers_map,
             "results": model_results,
             "feature_importance": feat_importance if feat_importance else None,
         }
@@ -632,7 +743,7 @@ def run_experiment(config: dict) -> dict:
     }
 
 
-def save_results(experiment: dict, output_dir: str = "reports/cycle_8"):
+def save_results(experiment: dict, output_dir: str = "reports/cycle_9"):
     """Save experiment results for all tickers."""
     out = Path(output_dir)
     out.mkdir(parents=True, exist_ok=True)
@@ -685,6 +796,9 @@ def save_results(experiment: dict, output_dir: str = "reports/cycle_8"):
                 model_metrics["regime_threshold_sweep"] = result["regime_threshold_sweep"]
             if "optimal_regime_threshold" in result:
                 model_metrics["optimal_regime_threshold"] = result["optimal_regime_threshold"]
+            if "selective" in result:
+                model_metrics["selective"] = result["selective"]
+                model_metrics["excluded_models"] = result.get("excluded_models", [])
             ticker_metrics["models"][model_name] = model_metrics
 
         # Cycle 4: Feature importance
@@ -703,6 +817,10 @@ def save_results(experiment: dict, output_dir: str = "reports/cycle_8"):
         if ticker_data.get("adaptive_hidden_sizes"):
             ticker_metrics["adaptive_hidden_sizes"] = ticker_data["adaptive_hidden_sizes"]
 
+        # Cycle 9: Adaptive num_layers per model
+        if ticker_data.get("adaptive_num_layers"):
+            ticker_metrics["adaptive_num_layers"] = ticker_data["adaptive_num_layers"]
+
         metrics["per_ticker"][ticker] = ticker_metrics
 
     with open(out / "metrics.json", "w") as f:
@@ -720,12 +838,12 @@ def main():
     config = load_config(args.config)
     experiment = run_experiment(config)
 
-    output_dir = args.output_dir or "reports/cycle_8"
+    output_dir = args.output_dir or "reports/cycle_9"
     save_results(experiment, output_dir=output_dir)
 
     # Print summary
     print("\n" + "=" * 70)
-    print("EXPERIMENT SUMMARY (Cycle 8)")
+    print("EXPERIMENT SUMMARY (Cycle 9)")
     print("=" * 70)
     for ticker, ticker_data in experiment["ticker_results"].items():
         print(f"\n{'─'*70}")
@@ -740,9 +858,13 @@ def main():
         if ticker_data.get("adaptive_hidden_sizes"):
             hs_parts = [f"{m}={hs}" for m, hs in ticker_data["adaptive_hidden_sizes"].items()]
             adaptive_hs_str = f", adaptive_hidden=[{', '.join(hs_parts)}]"
+        adaptive_nl_str = ""
+        if ticker_data.get("adaptive_num_layers"):
+            nl_parts = [f"{m}={nl}" for m, nl in ticker_data["adaptive_num_layers"].items()]
+            adaptive_nl_str = f", adaptive_layers=[{', '.join(nl_parts)}]"
         print(f"Ticker: {ticker} ({ticker_data['n_samples']} samples, "
               f"{ticker_data['n_features']} features, interval={ticker_data.get('interval', '1d')}"
-              f"{adaptive_hold_str}{adaptive_sl_str}{adaptive_hs_str})")
+              f"{adaptive_hold_str}{adaptive_sl_str}{adaptive_hs_str}{adaptive_nl_str})")
         print(f"{'─'*70}")
         for model_name, result in ticker_data["results"].items():
             if "error" in result:

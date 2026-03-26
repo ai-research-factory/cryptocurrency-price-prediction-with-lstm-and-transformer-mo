@@ -15,7 +15,7 @@ pip install -e ".[dev]"
 python3 -m src.cli run-experiment --config configs/default.yaml
 
 # Custom output directory
-python3 -m src.cli run-experiment --config configs/default.yaml --output-dir reports/cycle_8
+python3 -m src.cli run-experiment --config configs/default.yaml --output-dir reports/cycle_9
 
 # Run tests
 python3 -m pytest tests/ -v
@@ -45,7 +45,7 @@ data:
       period: "1y"
 ```
 
-### Cycle 8 Evaluation Options
+### Cycle 9 Evaluation Options
 
 ```yaml
 evaluation:
@@ -70,6 +70,10 @@ evaluation:
   regime_threshold_sweep: [1.0, 1.25, 1.5, 2.0, 2.5]  # Per-ticker regime calibration (Cycle 8)
   hidden_size_sweep: [32, 64, 128]                # Per-model hidden size search (Cycle 8)
   adaptive_hidden_size: true                      # Auto-select best hidden size per model/ticker (Cycle 8)
+  num_layers_sweep: [1, 2, 3]                     # Per-model num_layers search (Cycle 9)
+  adaptive_num_layers: true                       # Auto-select best depth per model/ticker (Cycle 9)
+  selective_ensemble: true                        # Drop models with negative Sharpe from ensemble (Cycle 9)
+  selective_ensemble_threshold: 0.0               # Minimum Sharpe to include in selective ensemble (Cycle 9)
 ```
 
 ## Project Structure
@@ -80,12 +84,12 @@ src/
   preprocessing.py   -- Feature normalization, outlier clipping, stationarity transforms
   indicators.py      -- Technical indicators with frequency-adaptive periods (Cycle 6)
   models.py          -- LSTM, GRU, and Transformer architectures (Cycle 6: +GRU)
-  training.py        -- Dataset preparation, training with LR scheduling + warm-up + early stopping (Cycle 8)
-  evaluation.py      -- Purged walk-forward, cost sensitivity, risk metrics, regime short, threshold/hidden sweep (Cycle 8)
-  cli.py             -- CLI experiment runner (5-ticker, adaptive architecture, regime calibration)
+  training.py        -- Dataset preparation, training with LR scheduling + warm-up + early stopping (Cycle 9: warmup-aware)
+  evaluation.py      -- Purged walk-forward, cost sensitivity, risk metrics, regime short, threshold/hidden/layers sweep (Cycle 9)
+  cli.py             -- CLI experiment runner (5-ticker, adaptive architecture, selective ensemble)
 configs/
   default.yaml       -- Default experiment configuration
-tests/               -- Unit tests for all modules (79 tests)
+tests/               -- Unit tests for all modules (83 tests)
 reports/cycle_1/     -- Cycle 1 experiment results
 reports/cycle_2/     -- Cycle 2 experiment results
 reports/cycle_3/     -- Cycle 3 experiment results
@@ -94,6 +98,7 @@ reports/cycle_5/     -- Cycle 5 experiment results
 reports/cycle_6/     -- Cycle 6 experiment results
 reports/cycle_7/     -- Cycle 7 experiment results
 reports/cycle_8/     -- Cycle 8 experiment results
+reports/cycle_9/     -- Cycle 9 experiment results
 ```
 
 ## Features
@@ -126,57 +131,48 @@ reports/cycle_8/     -- Cycle 8 experiment results
 - **Early stopping:** Reduces overfitting with validation-based early stopping (Cycle 8)
 - **Per-model hidden size search:** Auto-selects optimal architecture per model/ticker (Cycle 8)
 - **Regime threshold calibration:** Per-ticker optimal regime threshold via sweep (Cycle 8)
+- **Selective ensemble:** Drops underperforming models (Sharpe < threshold) from ensemble (Cycle 9)
+- **Per-model num_layers search:** Auto-selects optimal depth [1, 2, 3] per model/ticker (Cycle 9)
+- **Warmup-aware early stopping:** Early stopping skips warmup phase to let LR stabilize (Cycle 9)
 
-## Cycle 8 Results
+## Cycle 9 Results
 
-### BTC/USDT (Hourly, adaptive_hold=5, adaptive hidden/seq_len)
-
-| Model | Sharpe | Return | Trades | Notes |
-|-------|--------|--------|--------|-------|
-| LSTM (regression) | 1.49 | +1.2% | 8 | hidden=32, seq=50 |
-| **LSTM (classification)** | **2.04** | **+1.7%** | 2 | Beats baseline |
-| **Ensemble (equal)** | **7.10** | **+6.1%** | 11 | **Best overall** |
-| Buy-Hold | -0.76 | -0.6% | -- | BTC in downtrend |
-
-### ETH/USDT (Hourly, adaptive_hold=5, adaptive hidden/seq_len)
+### AAPL (Daily, adaptive_hold=5, adaptive HS/NL/SL)
 
 | Model | Sharpe | Return | Trades | Notes |
 |-------|--------|--------|--------|-------|
-| **Transformer (regression)** | **1.54** | **+2.9%** | 10 | hidden=32, seq=30, beats baseline |
-| Ensemble (equal) | 0.11 | +0.2% | 6 | |
-| Buy-Hold | -0.13 | -- | -- | ETH in downtrend |
+| **Transformer (regression)** | **0.66** | **+43.6%** | 38 | HS=32, NL=1, SL=30, stability=1.0 |
+| Transformer (regime, thr=1.0) | 0.96 | improved | -- | 135 shorts disabled |
+| Buy-Hold | 0.35 | +21.0% | -- | |
 
-### AAPL (Daily, adaptive_hold=3, adaptive hidden/seq_len)
-
-| Model | Sharpe | Return | Trades | Notes |
-|-------|--------|--------|--------|-------|
-| Transformer (regression) | -0.04 | -2.2% | 53 | hidden=32, seq=20 |
-| Transformer (classification) | -0.01 | -0.8% | 23 | Near flat |
-| Buy-Hold | 0.35-0.58 | varied | -- | |
-
-### SPY (Daily, adaptive_hold=10, adaptive hidden/seq_len)
+### ETH/USDT (Hourly, adaptive_hold=3, adaptive HS/NL/SL)
 
 | Model | Sharpe | Return | Trades | Notes |
 |-------|--------|--------|--------|-------|
-| **Transformer (regression)** | **1.70** | **+63.9%** | 29 | **hidden=128, seq=50, beats baseline** |
-| **Transformer (regime short)** | **2.40** | improved | -- | threshold=2.0 |
-| LSTM (classification) | 0.31 | +11.9% | 23 | |
-| Buy-Hold | 0.98 | +33.3% | -- | |
+| **GRU (regression)** | **3.66** | **+8.2%** | 11 | HS=32, NL=3, SL=20, stability=0.75 |
+| Buy-Hold | 0.46 | +1.0% | -- | |
 
-### MSFT (Daily, adaptive_hold=10, adaptive hidden/seq_len)
+### MSFT (Daily, adaptive_hold=2, adaptive HS/NL/SL)
 
 | Model | Sharpe | Return | Trades | Notes |
 |-------|--------|--------|--------|-------|
-| **GRU (regression)** | **0.67** | **+35.9%** | 26 | hidden=128, seq=30 |
-| **GRU (regime, threshold=1.0)** | **1.14** | improved | -- | 65 shorts disabled |
-| Transformer (regime short) | 0.24 | +11.0% | -- | threshold=1.25 |
-| Buy-Hold | 0.99-1.05 | +57-65% | -- | |
+| **Selective Ensemble** | **1.05** | **+64.9%** | -- | All 3 models positive |
+| **GRU (regime, thr=1.5)** | **1.08** | **+73.2%** | -- | 10 shorts disabled |
+| Transformer (regression) | 0.86 | +51.2% | 77 | HS=32, NL=2, SL=20 |
+| Buy-Hold | 1.01-1.05 | +65-70% | -- | |
 
-### Key findings:
-- **Ensemble fix restores key capability**: BTC ensemble (Sharpe 7.10) is the best project result
-- **SPY Transformer beats buy-and-hold** (Sharpe 1.70, regime 2.40 vs baseline 0.98) -- first significant equity win
-- **Per-model hidden size search finds diverse optima**: no universal best size; smaller models often preferred
-- **Early stopping reduces overfitting**: combined with hidden size search for better regularization
-- **Per-ticker regime calibration improves results**: MSFT GRU improves from 0.67 to 1.14
+### SPY (Daily, adaptive_hold=3, adaptive HS/NL/SL)
 
-See `reports/cycle_8/` for full metrics and details.
+| Model | Sharpe | Return | Trades | Notes |
+|-------|--------|--------|--------|-------|
+| LSTM CLS | 0.76 | +29.7% | 9 | Classification beats regression |
+| Buy-Hold | 1.16 | +48.3% | -- | |
+
+### Key Findings (Cycle 9):
+- **num_layers preferences are model-specific**: GRU prefers 3 layers across all tickers; Transformer prefers 1-2
+- **Selective ensemble works when all models are positive**: MSFT selective ensemble (1.05) matches full ensemble since all models contribute positively
+- **Results vary across data periods**: BTC went from Cycle 8 ensemble 7.10 to all-negative, confirming market-regime dependence
+- **AAPL Transformer achieves perfect stability** (3/3 positive windows) with shallow architecture (NL=1)
+- **Early stopping + warmup fix ensures proper Transformer training**: warmup phase is no longer interrupted
+
+See `reports/cycle_9/` for full metrics and details.

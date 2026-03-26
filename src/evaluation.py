@@ -16,6 +16,8 @@ volatility-regime-based short toggling.
 
 Cycle 8: Added regime threshold calibration sweep, hidden size search,
 early stopping support.
+
+Cycle 9: Added num_layers search, selective ensemble (drop underperformers).
 """
 
 import logging
@@ -945,3 +947,90 @@ def select_optimal_hidden_size(
         return default_hidden_size
     best = max(valid, key=lambda r: r["sharpe_ratio"])
     return best["hidden_size"]
+
+
+def num_layers_sweep(
+    features: np.ndarray,
+    targets: np.ndarray,
+    model_type: str,
+    model_kwargs: dict,
+    num_layers_levels: list[int],
+    seq_len: int = 30,
+    train_size: int = 500,
+    test_size: int = 60,
+    step_size: int = 60,
+    epochs: int = 50,
+    batch_size: int = 32,
+    lr: float = 1e-3,
+    cost_bps: float = 10.0,
+    device: str = "cpu",
+    purge_gap: int = 0,
+    interval: str = "1d",
+    adaptive_window: bool = False,
+    min_holding_period: int = 1,
+    allow_short: bool = False,
+    warmup_epochs: int = 0,
+    early_stopping_patience: int = 0,
+) -> list[dict]:
+    """Sweep num_layers to find optimal depth per model type.
+
+    Cycle 9: Evaluates model performance at different num_layers values.
+    """
+    results = []
+    for nl in num_layers_levels:
+        logger.info(f"  num_layers sweep: testing num_layers={nl} for {model_type}")
+        mkwargs = dict(model_kwargs)
+        mkwargs["num_layers"] = nl
+        # For single-layer models, dropout between layers has no effect
+        # but the model handles this internally (dropout=0 if num_layers==1)
+
+        wf_result = walk_forward_validation(
+            features=features,
+            targets=targets,
+            model_type=model_type,
+            model_kwargs=mkwargs,
+            seq_len=seq_len,
+            train_size=train_size,
+            test_size=test_size,
+            step_size=step_size,
+            epochs=epochs,
+            batch_size=batch_size,
+            lr=lr,
+            cost_bps=cost_bps,
+            device=device,
+            purge_gap=purge_gap,
+            interval=interval,
+            adaptive_window=adaptive_window,
+            min_holding_period=min_holding_period,
+            allow_short=allow_short,
+            warmup_epochs=warmup_epochs,
+            early_stopping_patience=early_stopping_patience,
+        )
+        if "error" in wf_result:
+            results.append({
+                "num_layers": nl,
+                "error": wf_result["error"],
+            })
+        else:
+            agg = wf_result["aggregate"]
+            results.append({
+                "num_layers": nl,
+                "sharpe_ratio": agg["sharpe_ratio"],
+                "sortino_ratio": agg["sortino_ratio"],
+                "total_return": agg["total_return"],
+                "n_trades": agg["n_trades"],
+                "n_windows": wf_result["n_windows"],
+            })
+    return results
+
+
+def select_optimal_num_layers(
+    sweep_results: list[dict],
+    default_num_layers: int = 2,
+) -> int:
+    """Select the num_layers with best Sharpe ratio."""
+    valid = [r for r in sweep_results if "sharpe_ratio" in r and "error" not in r]
+    if not valid:
+        return default_num_layers
+    best = max(valid, key=lambda r: r["sharpe_ratio"])
+    return best["num_layers"]

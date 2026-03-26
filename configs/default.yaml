@@ -79,3 +79,9 @@ evaluation:
   # Cycle 8: per-model hidden size search
   hidden_size_sweep: [32, 64, 128]
   adaptive_hidden_size: true
+  # Cycle 9: per-model num_layers search
+  num_layers_sweep: [1, 2, 3]
+  adaptive_num_layers: true
+  # Cycle 9: selective ensemble (drop models with Sharpe below threshold)
+  selective_ensemble: true
+  selective_ensemble_threshold: 0.0

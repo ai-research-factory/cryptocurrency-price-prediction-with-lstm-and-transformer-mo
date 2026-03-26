@@ -47,18 +47,20 @@
 - ~~**Regime detection calibration (#5):** Implemented per-ticker threshold sweep across [1.0, 1.25, 1.5, 2.0, 2.5]. Lower thresholds (1.0-1.25) generally better for equities. SPY Transformer prefers 2.0. MSFT GRU improves from 0.67 to 1.14 with threshold=1.0.~~
 - ~~**Model architecture search (#6):** Implemented per-model hidden size sweep [32, 64, 128]. Each model-ticker gets optimal architecture. No universal preference; smaller models (32) often selected, suggesting prior cycles were overfitting.~~
 
+## Addressed in Cycle 9
+
+- ~~**Selective ensemble (#5):** Implemented selective ensemble that drops models with Sharpe below threshold (default: 0.0). Most tickers have 0-1 positive models, preventing selective ensemble formation. MSFT is the only ticker where all 3 models are positive, producing selective ensemble Sharpe 1.05. The mechanism is sound but requires more model diversity.~~
+- ~~**num_layers search (#6):** Implemented per-model num_layers sweep [1, 2, 3]. GRU consistently prefers 3 layers across all tickers. Transformer prefers 1-2 layers. LSTM is mixed (1-3). No universal depth preference; confirms value of per-model-ticker adaptation.~~
+- ~~**Early stopping + warmup interaction (#7):** Fixed by skipping early stopping checks during warmup phase (epoch < warmup_epochs). Transformer now always completes warmup before early stopping can trigger.~~
+
 ## Remaining
 
-1. **AAPL Cycle 5 result fragility:** Still unexplained. Cycle 5 ensemble (0.39) has not been replicated in Cycles 6, 7, or 8. Likely an artifact of a specific configuration hitting a favorable market regime.
+1. **Result instability across cycles:** BTC/USDT results vary dramatically between cycles (Cycle 8 ensemble Sharpe 7.10 vs Cycle 9 all-negative). Different API data fetch periods produce different results, indicating models are fitting to specific market regimes rather than learning generalizable patterns.
 
-2. **BTC low-trade regime persistence:** BTC models continue to perform well with few trades (2-11 in Cycle 8). BTC LSTM classification achieves Sharpe 2.04 with only 2 trades. Selective timing or luck is unclear with such low trade counts.
+2. **Cross-validated sweep efficiency (#3):** With num_layers sweep added, the total pre-experiment sweeps are now 30 full walk-forwards per ticker (hidden_size=9, num_layers=9, seq_len=12). A lighter inner validation loop or joint search would reduce the multiplicative cost.
 
-3. **Cross-validated seq_len selection:** Current adaptive seq_len runs a full walk-forward sweep per model per ticker, which with hidden size sweep compounds to (3 hidden sizes x 3 models + 4 seq_len x 3 models) = 21 full walk-forwards per ticker before the actual experiment. A lighter inner validation loop would reduce runtime.
+3. **Statistical significance gap (#4):** After 9 cycles and 5 tickers, no model achieves statistical significance of outperformance vs buy-and-hold (p < 0.05). SPY models achieve p < 0.05 but indicate significant underperformance. Walk-forward window count (3-4) limits statistical power.
 
-4. **Statistical significance gap:** After 8 cycles and 5 tickers, no model achieves statistical significance vs buy-and-hold (p < 0.05). Walk-forward window count (3) limits statistical power. SPY Transformer (p=0.35) is closest but still far from significant despite Sharpe 1.70.
+4. **Classification vs regression on SPY:** SPY classification models (LSTM CLS Sharpe 0.76, Transformer CLS 0.35) outperform all regression models in Cycle 9. This contradicts the Cycle 5 finding that regression is universally better. May warrant per-ticker mode selection.
 
-5. **Ensemble model selection:** Current ensemble always includes all 3 models. SPY ensemble (Sharpe -1.27) is dragged down by weak LSTM/GRU while Transformer alone achieves 1.70. A selective ensemble that drops underperforming models could improve results.
-
-6. **num_layers search:** Hidden size is now adaptive but num_layers is still fixed at 2. Sweeping [1, 2, 3] could reveal model-specific preferences, especially for Transformer.
-
-7. **Early stopping interaction with warm-up:** With early stopping patience=7 and warm-up epochs=5, Transformer may stop before warm-up effects fully manifest. May need to disable early stopping during warm-up phase or increase patience for Transformer.
+5. **Selective ensemble limitations:** With threshold=0.0, most tickers have insufficient positive models to form a selective ensemble. A negative threshold (e.g., -0.5) would allow more models but defeat the purpose. Need more model types or a dynamic threshold based on market conditions.
