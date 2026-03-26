@@ -1,6 +1,8 @@
 """CLI entry point for running experiments.
 
 Cycle 4: Added ensemble model, feature importance, min holding period, ETH/USDT.
+Cycle 5: Added classification mode, long/short strategy, min hold sweep,
+inverse-variance ensemble weighting.
 """
 
 import argparse
@@ -16,7 +18,12 @@ import yaml
 from .data import fetch_ohlcv, compute_returns, validate_ohlcv, clean_ohlcv, compute_data_summary
 from .indicators import compute_all_indicators
 from .preprocessing import preprocess_features, compute_feature_stats
-from .evaluation import walk_forward_validation, compute_feature_importance, compute_trading_metrics, compute_naive_baseline, compute_significance_vs_baseline, cost_sensitivity_analysis, _apply_min_holding_period
+from .evaluation import (
+    walk_forward_validation, compute_feature_importance,
+    compute_trading_metrics, compute_naive_baseline,
+    compute_significance_vs_baseline, cost_sensitivity_analysis,
+    _apply_min_holding_period, min_holding_period_sweep,
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -73,11 +80,15 @@ def _build_ensemble_result(
     interval: str,
     cost_sensitivity_levels: list[float] | None,
     min_holding_period: int,
+    allow_short: bool = False,
+    classification: bool = False,
+    ensemble_method: str = "equal",
 ) -> dict | None:
-    """Build ensemble result by averaging predictions from all models.
+    """Build ensemble result by combining predictions from all models.
 
-    Requires that all individual models stored their per-window predictions.
-    Falls back to averaging aggregate predictions if available.
+    Cycle 5: Added inverse-variance weighting and long/short support.
+    ensemble_method: "equal" for simple average, "inverse_variance" for
+    weighting by inverse of per-model return variance.
     """
     # Collect all_preds and all_actuals from each model's window_details
     model_all_preds = {}
@@ -95,19 +106,51 @@ def _build_ensemble_result(
         logger.warning("Model prediction lengths differ, cannot ensemble")
         return None
 
-    # Average predictions
-    pred_arrays = list(model_all_preds.values())
-    ensemble_preds = np.mean(pred_arrays, axis=0)
     all_actuals = np.array(model_results[list(model_all_preds.keys())[0]]["all_actuals"])
-
-    from .evaluation import get_annualization_factor
     cost_bps = eval_cfg.get("cost_bps", 10.0)
 
-    agg_metrics = compute_trading_metrics(ensemble_preds, all_actuals, cost_bps, interval, min_holding_period)
+    # Compute weights
+    if ensemble_method == "inverse_variance":
+        # Weight each model by inverse of its return variance (lower variance = higher weight)
+        variances = {}
+        for mtype, preds in model_all_preds.items():
+            metrics = compute_trading_metrics(
+                preds, all_actuals, cost_bps, interval, min_holding_period,
+                allow_short=allow_short, classification=classification,
+            )
+            var = metrics["std_period_return"] ** 2
+            variances[mtype] = max(var, 1e-10)
+
+        total_inv_var = sum(1.0 / v for v in variances.values())
+        weights = {m: (1.0 / v) / total_inv_var for m, v in variances.items()}
+        logger.info(f"Inverse-variance weights: {weights}")
+
+        ensemble_preds = sum(
+            weights[m] * model_all_preds[m] for m in model_all_preds
+        )
+    else:
+        # Equal weighting
+        pred_arrays = list(model_all_preds.values())
+        ensemble_preds = np.mean(pred_arrays, axis=0)
+        weights = {m: 1.0 / len(model_all_preds) for m in model_all_preds}
+
+    agg_metrics = compute_trading_metrics(
+        ensemble_preds, all_actuals, cost_bps, interval, min_holding_period,
+        allow_short=allow_short, classification=classification,
+    )
     baseline_metrics = compute_naive_baseline(all_actuals, cost_bps, interval)
 
     # Significance test
-    position = (ensemble_preds > 0).astype(float)
+    if classification:
+        if allow_short:
+            position = np.where(ensemble_preds > 0.5, 1.0, -1.0)
+        else:
+            position = (ensemble_preds > 0.5).astype(float)
+    else:
+        if allow_short:
+            position = np.sign(ensemble_preds)
+        else:
+            position = (ensemble_preds > 0).astype(float)
     position = _apply_min_holding_period(position, min_holding_period)
     cost = cost_bps / 10_000
     trades = np.abs(np.diff(position, prepend=0))
@@ -115,7 +158,9 @@ def _build_ensemble_result(
     significance = compute_significance_vs_baseline(strategy_returns, all_actuals)
 
     result = {
-        "model_type": "ensemble",
+        "model_type": f"ensemble_{ensemble_method}",
+        "ensemble_method": ensemble_method,
+        "ensemble_weights": {m: float(w) for m, w in weights.items()},
         "aggregate": agg_metrics,
         "baseline_buy_hold": baseline_metrics,
         "significance_vs_baseline": significance,
@@ -124,14 +169,15 @@ def _build_ensemble_result(
 
     if cost_sensitivity_levels:
         result["cost_sensitivity"] = cost_sensitivity_analysis(
-            ensemble_preds, all_actuals, cost_sensitivity_levels, interval, min_holding_period
+            ensemble_preds, all_actuals, cost_sensitivity_levels, interval,
+            min_holding_period, allow_short=allow_short, classification=classification,
         )
 
     return result
 
 
 def run_experiment(config: dict) -> dict:
-    """Run full experiment pipeline with Cycle 4 enhancements."""
+    """Run full experiment pipeline with Cycle 5 enhancements."""
     data_cfg = config["data"]
     model_cfg = config["model"]
     train_cfg = config["training"]
@@ -149,6 +195,11 @@ def run_experiment(config: dict) -> dict:
     min_holding_period = eval_cfg.get("min_holding_period", 1)
     run_feature_importance = eval_cfg.get("feature_importance", False)
     run_ensemble = eval_cfg.get("ensemble", True)
+    # Cycle 5: new options
+    allow_short = eval_cfg.get("allow_short", False)
+    classification = eval_cfg.get("classification", False)
+    ensemble_method = eval_cfg.get("ensemble_method", "equal")
+    min_hold_sweep_levels = eval_cfg.get("min_hold_sweep", None)
 
     all_ticker_results = {}
 
@@ -178,22 +229,25 @@ def run_experiment(config: dict) -> dict:
         logger.info(f"Features: {feature_cols}")
         logger.info(f"Interval: {interval}, Purge gap: {purge_gap}, "
                      f"Adaptive window: {adaptive_window}, "
-                     f"Min holding period: {min_holding_period}")
+                     f"Min holding period: {min_holding_period}, "
+                     f"Allow short: {allow_short}, "
+                     f"Classification: {classification}")
 
         model_results = {}
+
+        # Run regression mode (baseline from previous cycles)
         for mtype in model_cfg["types"]:
             logger.info(f"\n{'='*60}")
-            logger.info(f"Running walk-forward validation for {mtype.upper()} on {ticker}")
+            logger.info(f"Running walk-forward validation for {mtype.upper()} (regression) on {ticker}")
             logger.info(f"{'='*60}")
 
             mkwargs = model_cfg.get(mtype, {})
-            mkwargs["input_size"] = len(feature_cols)
 
             result = walk_forward_validation(
                 features=features,
                 targets=targets,
                 model_type=mtype,
-                model_kwargs={k: v for k, v in mkwargs.items() if k != "input_size"},
+                model_kwargs=mkwargs,
                 seq_len=train_cfg.get("seq_len", 30),
                 train_size=eval_cfg.get("train_size", 500),
                 test_size=eval_cfg.get("test_size", 60),
@@ -207,25 +261,68 @@ def run_experiment(config: dict) -> dict:
                 adaptive_window=adaptive_window,
                 cost_sensitivity_levels=cost_sensitivity_levels,
                 min_holding_period=min_holding_period,
+                allow_short=allow_short,
+                classification=False,
+                min_hold_sweep_levels=min_hold_sweep_levels,
             )
             model_results[mtype] = result
 
-        # Cycle 4: Ensemble model (average of all model predictions)
-        if run_ensemble and len(model_cfg["types"]) >= 2:
-            logger.info(f"\n{'='*60}")
-            logger.info(f"Building ENSEMBLE model for {ticker}")
-            logger.info(f"{'='*60}")
-            ensemble_result = _build_ensemble_result(
-                model_results, features, targets, eval_cfg, interval,
-                cost_sensitivity_levels, min_holding_period,
-            )
-            if ensemble_result is not None:
-                model_results["ensemble"] = ensemble_result
-                logger.info(f"Ensemble Sharpe: {ensemble_result['aggregate']['sharpe_ratio']:.4f}")
-            else:
-                logger.warning("Could not build ensemble — insufficient predictions")
+        # Cycle 5: Run classification mode for comparison
+        if classification:
+            for mtype in model_cfg["types"]:
+                logger.info(f"\n{'='*60}")
+                logger.info(f"Running walk-forward for {mtype.upper()} (classification) on {ticker}")
+                logger.info(f"{'='*60}")
 
-        # Cycle 4: Feature importance analysis
+                mkwargs = dict(model_cfg.get(mtype, {}))
+                mkwargs["classification"] = True
+
+                result = walk_forward_validation(
+                    features=features,
+                    targets=targets,
+                    model_type=mtype,
+                    model_kwargs=mkwargs,
+                    seq_len=train_cfg.get("seq_len", 30),
+                    train_size=eval_cfg.get("train_size", 500),
+                    test_size=eval_cfg.get("test_size", 60),
+                    step_size=eval_cfg.get("step_size", 60),
+                    epochs=train_cfg.get("epochs", 50),
+                    batch_size=train_cfg.get("batch_size", 32),
+                    lr=train_cfg.get("lr", 1e-3),
+                    cost_bps=eval_cfg.get("cost_bps", 10.0),
+                    purge_gap=purge_gap,
+                    interval=interval,
+                    adaptive_window=adaptive_window,
+                    cost_sensitivity_levels=cost_sensitivity_levels,
+                    min_holding_period=min_holding_period,
+                    allow_short=allow_short,
+                    classification=True,
+                    min_hold_sweep_levels=min_hold_sweep_levels,
+                )
+                model_results[f"{mtype}_cls"] = result
+
+        # Cycle 5: Ensemble models (both equal and inverse-variance)
+        if run_ensemble and len(model_cfg["types"]) >= 2:
+            for method in ["equal", "inverse_variance"]:
+                logger.info(f"\n{'='*60}")
+                logger.info(f"Building ENSEMBLE ({method}) for {ticker}")
+                logger.info(f"{'='*60}")
+                # Only ensemble regression models
+                reg_results = {m: model_results[m] for m in model_cfg["types"] if m in model_results}
+                ensemble_result = _build_ensemble_result(
+                    reg_results, features, targets, eval_cfg, interval,
+                    cost_sensitivity_levels, min_holding_period,
+                    allow_short=allow_short, classification=False,
+                    ensemble_method=method,
+                )
+                if ensemble_result is not None:
+                    model_results[f"ensemble_{method}"] = ensemble_result
+                    logger.info(f"Ensemble ({method}) Sharpe: "
+                                f"{ensemble_result['aggregate']['sharpe_ratio']:.4f}")
+                else:
+                    logger.warning(f"Could not build {method} ensemble")
+
+        # Cycle 4: Feature importance analysis (skip in Cycle 5 to save time)
         feat_importance = {}
         if run_feature_importance:
             for mtype in model_cfg["types"]:
@@ -237,7 +334,7 @@ def run_experiment(config: dict) -> dict:
                     features=features,
                     targets=targets,
                     model_type=mtype,
-                    model_kwargs={k: v for k, v in mkwargs.items() if k != "input_size"},
+                    model_kwargs=mkwargs,
                     feature_names=feature_cols,
                     seq_len=train_cfg.get("seq_len", 30),
                     train_size=eval_cfg.get("train_size", 500),
@@ -269,7 +366,7 @@ def run_experiment(config: dict) -> dict:
     }
 
 
-def save_results(experiment: dict, output_dir: str = "reports/cycle_4"):
+def save_results(experiment: dict, output_dir: str = "reports/cycle_5"):
     """Save experiment results for all tickers."""
     out = Path(output_dir)
     out.mkdir(parents=True, exist_ok=True)
@@ -305,8 +402,13 @@ def save_results(experiment: dict, output_dir: str = "reports/cycle_4"):
                 model_metrics["walk_forward_config"] = result.get("walk_forward_config", {})
             if "component_models" in result:
                 model_metrics["component_models"] = result["component_models"]
+            if "ensemble_method" in result:
+                model_metrics["ensemble_method"] = result["ensemble_method"]
+                model_metrics["ensemble_weights"] = result.get("ensemble_weights", {})
             if "cost_sensitivity" in result:
                 model_metrics["cost_sensitivity"] = result["cost_sensitivity"]
+            if "min_hold_sweep" in result:
+                model_metrics["min_hold_sweep"] = result["min_hold_sweep"]
             ticker_metrics["models"][model_name] = model_metrics
 
         # Cycle 4: Feature importance
@@ -330,12 +432,12 @@ def main():
     config = load_config(args.config)
     experiment = run_experiment(config)
 
-    output_dir = args.output_dir or "reports/cycle_4"
+    output_dir = args.output_dir or "reports/cycle_5"
     save_results(experiment, output_dir=output_dir)
 
     # Print summary
     print("\n" + "=" * 70)
-    print("EXPERIMENT SUMMARY (Cycle 4)")
+    print("EXPERIMENT SUMMARY (Cycle 5)")
     print("=" * 70)
     for ticker, ticker_data in experiment["ticker_results"].items():
         print(f"\n{'─'*70}")
@@ -352,12 +454,17 @@ def main():
             wf = result.get("walk_forward_config", {})
             n_win = result.get('n_windows', '-')
             if wf:
-                print(f"\n  {model_name.upper()} (windows={n_win}, "
+                cls_label = " [CLS]" if wf.get("classification") else ""
+                short_label = " [L/S]" if wf.get("allow_short") else ""
+                print(f"\n  {model_name.upper()}{cls_label}{short_label} (windows={n_win}, "
                       f"train={wf.get('train_size','?')}, test={wf.get('test_size','?')}, "
                       f"purge={wf.get('purge_gap',0)}, min_hold={wf.get('min_holding_period',1)}):")
             else:
                 components = result.get("component_models", [])
-                print(f"\n  {model_name.upper()} (components: {', '.join(components)}):")
+                method = result.get("ensemble_method", "equal")
+                weights = result.get("ensemble_weights", {})
+                weight_str = ", ".join(f"{m}={w:.2f}" for m, w in weights.items())
+                print(f"\n  {model_name.upper()} ({method}, weights: {weight_str}):")
             print(f"    Sharpe (net):     {agg['sharpe_ratio']:.4f}  (baseline: {bl.get('sharpe_ratio', 0):.4f})")
             print(f"    Sortino (net):    {agg['sortino_ratio']:.4f}  (baseline: {bl.get('sortino_ratio', 0):.4f})")
             print(f"    Total Return:     {agg['total_return']:.4f}  (baseline: {bl.get('total_return', 0):.4f})")
@@ -370,6 +477,11 @@ def main():
             if sig:
                 print(f"    Significance:     p={sig.get('p_value', 'N/A'):.4f} "
                       f"({'significant' if sig.get('significant_5pct') else 'not significant'} at 5%)")
+            if "min_hold_sweep" in result:
+                print(f"    Min hold sweep:")
+                for hs in result["min_hold_sweep"]:
+                    print(f"      hold={hs['min_hold']:2d} → Sharpe={hs['sharpe_ratio']:.4f}, "
+                          f"trades={hs['n_trades']}")
             if "cost_sensitivity" in result:
                 print(f"    Cost sensitivity:")
                 for cs in result["cost_sensitivity"]:

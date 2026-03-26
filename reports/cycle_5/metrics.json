@@ -1,0 +1,2226 @@
+{
+  "tickers": [
+    "BTC/USDT",
+    "ETH/USDT",
+    "AAPL"
+  ],
+  "per_ticker": {
+    "BTC/USDT": {
+      "n_samples": 686,
+      "n_features": 12,
+      "interval": "1h",
+      "data_summary": {
+        "ticker": "BTC/USDT",
+        "n_rows": 720,
+        "date_range": [
+          "2026-02-24 20:00:00",
+          "2026-03-26 19:00:00"
+        ],
+        "price_range": [
+          63216.01,
+          75623.91
+        ],
+        "mean_daily_return": 8.265543910037016e-05,
+        "std_daily_return": 0.005646857548901564,
+        "annualized_volatility": 0.08964108458040776,
+        "skewness": 0.29884339036690205,
+        "kurtosis": 5.580233480277844,
+        "mean_volume": 984.0392265555555
+      },
+      "models": {
+        "lstm": {
+          "aggregate": {
+            "total_return": -0.006378854980405903,
+            "annualized_return": -0.15811194639956927,
+            "sharpe_ratio": -0.3979537320186008,
+            "sortino_ratio": -0.39582073430227516,
+            "max_drawdown": 0.08051489196833048,
+            "calmar_ratio": -1.9637602750775673,
+            "win_rate": 0.8187919463087249,
+            "n_trades": 23,
+            "total_cost": 0.045,
+            "n_periods": 244,
+            "mean_period_return": -2.6226585286747642e-05,
+            "std_period_return": 0.005125250047112887
+          },
+          "baseline_buy_hold": {
+            "total_return": 0.013068403445732759,
+            "annualized_return": 0.3239250165565235,
+            "sharpe_ratio": 0.8072683337880571,
+            "sortino_ratio": 0.8046107560042167,
+            "max_drawdown": 0.08191532975188565,
+            "calmar_ratio": 3.9543882389006306,
+            "n_periods": 244
+          },
+          "significance_vs_baseline": {
+            "t_stat": -0.21882708868558012,
+            "p_value": 0.8269684228611645,
+            "significant_5pct": false
+          },
+          "stability_ratio": 0.5,
+          "n_windows": 4,
+          "positive_windows": 2,
+          "window_sharpe_stats": {
+            "mean": -1.0942550001640778,
+            "std": 5.02892796669018,
+            "min": -6.42021163078825,
+            "max": 4.350786860328685
+          },
+          "walk_forward_config": {
+            "train_size": 212,
+            "test_size": 91,
+            "step_size": 91,
+            "purge_gap": 5,
+            "adaptive_window": true,
+            "interval": "1h",
+            "annualization_factor": 6048,
+            "min_holding_period": 3,
+            "allow_short": true,
+            "classification": false
+          },
+          "cost_sensitivity": [
+            {
+              "cost_bps": 0.0,
+              "sharpe_ratio": 2.401712996581983,
+              "total_return": 0.0393553998848949,
+              "total_cost": 0.0,
+              "sortino_ratio": 2.436266578029614
+            },
+            {
+              "cost_bps": 2.0,
+              "sharpe_ratio": 1.843407030077455,
+              "total_return": 0.030043169181568193,
+              "total_cost": 0.009000000000000001,
+              "sortino_ratio": 1.867460667363754
+            },
+            {
+              "cost_bps": 5.0,
+              "sharpe_ratio": 1.0030981566816017,
+              "total_return": 0.016231028121030843,
+              "total_cost": 0.0225,
+              "sortino_ratio": 1.0077712995880153
+            },
+            {
+              "cost_bps": 10.0,
+              "sharpe_ratio": -0.3979537320186008,
+              "total_return": -0.006378854980405903,
+              "total_cost": 0.045,
+              "sortino_ratio": -0.39582073430227516
+            },
+            {
+              "cost_bps": 20.0,
+              "sharpe_ratio": -3.1552851466729095,
+              "total_return": -0.05010068746514668,
+              "total_cost": 0.09,
+              "sortino_ratio": -3.1079923050785014
+            },
+            {
+              "cost_bps": 50.0,
+              "sharpe_ratio": -10.343269985596626,
+              "total_return": -0.17005785613677352,
+              "total_cost": 0.225,
+              "sortino_ratio": -9.390629785452019
+            }
+          ],
+          "min_hold_sweep": [
+            {
+              "min_hold": 1,
+              "sharpe_ratio": -2.397429175143025,
+              "sortino_ratio": -2.33940028356222,
+              "total_return": -0.03799104489501502,
+              "n_trades": 25,
+              "total_cost": 0.049
+            },
+            {
+              "min_hold": 2,
+              "sharpe_ratio": -1.921356903049192,
+              "sortino_ratio": -1.8814672038168077,
+              "total_return": -0.0305221345953686,
+              "n_trades": 25,
+              "total_cost": 0.049
+            },
+            {
+              "min_hold": 3,
+              "sharpe_ratio": -0.3979537320186008,
+              "sortino_ratio": -0.39582073430227516,
+              "total_return": -0.006378854980405903,
+              "n_trades": 23,
+              "total_cost": 0.045
+            },
+            {
+              "min_hold": 5,
+              "sharpe_ratio": 1.7104607230552284,
+              "sortino_ratio": 1.723661454504334,
+              "total_return": 0.027725687125530966,
+              "n_trades": 21,
+              "total_cost": 0.041
+            },
+            {
+              "min_hold": 10,
+              "sharpe_ratio": 1.4391205486438918,
+              "sortino_ratio": 1.4134625189870946,
+              "total_return": 0.023403098274490438,
+              "n_trades": 17,
+              "total_cost": 0.033
+            }
+          ]
+        },
+        "transformer": {
+          "aggregate": {
+            "total_return": 0.06501271745355043,
+            "annualized_return": 1.6114627670453812,
+            "sharpe_ratio": 3.9181591293519733,
+            "sortino_ratio": 4.536873209481522,
+            "max_drawdown": 0.07764824816729776,
+            "calmar_ratio": 20.753369265632227,
+            "win_rate": 1.8688524590163935,
+            "n_trades": 2,
+            "total_cost": 0.003,
+            "n_periods": 244,
+            "mean_period_return": 0.00025814237852881723,
+            "std_period_return": 0.005123693336443548
+          },
+          "baseline_buy_hold": {
+            "total_return": 0.013068403445732759,
+            "annualized_return": 0.3239250165565235,
+            "sharpe_ratio": 0.8072683337880571,
+            "sortino_ratio": 0.8046107560042167,
+            "max_drawdown": 0.08191532975188565,
+            "calmar_ratio": 3.9543882389006306,
+            "n_periods": 244
+          },
+          "significance_vs_baseline": {
+            "t_stat": 0.3957144440594778,
+            "p_value": 0.692662896570367,
+            "significant_5pct": false
+          },
+          "stability_ratio": 0.75,
+          "n_windows": 4,
+          "positive_windows": 3,
+          "window_sharpe_stats": {
+            "mean": 3.861801989951802,
+            "std": 4.942131547306093,
+            "min": -4.007486443437767,
+            "max": 8.456326460305533
+          },
+          "walk_forward_config": {
+            "train_size": 212,
+            "test_size": 91,
+            "step_size": 91,
+            "purge_gap": 5,
+            "adaptive_window": true,
+            "interval": "1h",
+            "annualization_factor": 6048,
+            "min_holding_period": 3,
+            "allow_short": true,
+            "classification": false
+          },
+          "cost_sensitivity": [
+            {
+              "cost_bps": 0.0,
+              "sharpe_ratio": 4.109423781496911,
+              "total_return": 0.06821255295929345,
+              "total_cost": 0.0,
+              "sortino_ratio": 4.765041649389023
+            },
+            {
+              "cost_bps": 2.0,
+              "sharpe_ratio": 4.071388632651695,
+              "total_return": 0.0675718176673275,
+              "total_cost": 0.0006000000000000001,
+              "sortino_ratio": 4.72005758379617
+            },
+            {
+              "cost_bps": 5.0,
+              "sharpe_ratio": 4.014125953327098,
+              "total_return": 0.06661143526833228,
+              "total_cost": 0.0015,
+              "sortino_ratio": 4.651954147986507
+            },
+            {
+              "cost_bps": 10.0,
+              "sharpe_ratio": 3.9181591293519733,
+              "total_return": 0.06501271745355043,
+              "total_cost": 0.003,
+              "sortino_ratio": 4.536873209481522
+            },
+            {
+              "cost_bps": 20.0,
+              "sharpe_ratio": 3.724453110009216,
+              "total_return": 0.06182246706945336,
+              "total_cost": 0.006,
+              "sortino_ratio": 4.301487743586687
+            },
+            {
+              "cost_bps": 50.0,
+              "sharpe_ratio": 3.1334766973556096,
+              "total_return": 0.05230893995406885,
+              "total_cost": 0.015,
+              "sortino_ratio": 3.567839423365093
+            }
+          ],
+          "min_hold_sweep": [
+            {
+              "min_hold": 1,
+              "sharpe_ratio": 3.9181591293519733,
+              "sortino_ratio": 4.536873209481522,
+              "total_return": 0.06501271745355043,
+              "n_trades": 2,
+              "total_cost": 0.003
+            },
+            {
+              "min_hold": 2,
+              "sharpe_ratio": 3.9181591293519733,
+              "sortino_ratio": 4.536873209481522,
+              "total_return": 0.06501271745355043,
+              "n_trades": 2,
+              "total_cost": 0.003
+            },
+            {
+              "min_hold": 3,
+              "sharpe_ratio": 3.9181591293519733,
+              "sortino_ratio": 4.536873209481522,
+              "total_return": 0.06501271745355043,
+              "n_trades": 2,
+              "total_cost": 0.003
+            },
+            {
+              "min_hold": 5,
+              "sharpe_ratio": 3.9181591293519733,
+              "sortino_ratio": 4.536873209481522,
+              "total_return": 0.06501271745355043,
+              "n_trades": 2,
+              "total_cost": 0.003
+            },
+            {
+              "min_hold": 10,
+              "sharpe_ratio": 3.9181591293519733,
+              "sortino_ratio": 4.536873209481522,
+              "total_return": 0.06501271745355043,
+              "n_trades": 2,
+              "total_cost": 0.003
+            }
+          ]
+        },
+        "lstm_cls": {
+          "aggregate": {
+            "total_return": -0.0016023081503726544,
+            "annualized_return": -0.03971622825185989,
+            "sharpe_ratio": -0.09885620432949675,
+            "sortino_ratio": -0.10261240773828569,
+            "max_drawdown": 0.08621255351741222,
+            "calmar_ratio": -0.4606780176606005,
+            "win_rate": 1.2040816326530612,
+            "n_trades": 32,
+            "total_cost": 0.063,
+            "n_periods": 244,
+            "mean_period_return": -6.572103356466172e-06,
+            "std_period_return": 0.005170188111341585
+          },
+          "baseline_buy_hold": {
+            "total_return": 0.013068403445732759,
+            "annualized_return": 0.3239250165565235,
+            "sharpe_ratio": 0.8072683337880571,
+            "sortino_ratio": 0.8046107560042167,
+            "max_drawdown": 0.08191532975188565,
+            "calmar_ratio": 3.9543882389006306,
+            "n_periods": 244
+          },
+          "significance_vs_baseline": {
+            "t_stat": -0.1250135784462089,
+            "p_value": 0.900616158876359,
+            "significant_5pct": false
+          },
+          "stability_ratio": 0.25,
+          "n_windows": 4,
+          "positive_windows": 1,
+          "window_sharpe_stats": {
+            "mean": -1.4973956732396108,
+            "std": 9.252470970796807,
+            "min": -8.046464077293644,
+            "max": 14.413039518082252
+          },
+          "walk_forward_config": {
+            "train_size": 212,
+            "test_size": 91,
+            "step_size": 91,
+            "purge_gap": 5,
+            "adaptive_window": true,
+            "interval": "1h",
+            "annualization_factor": 6048,
+            "min_holding_period": 3,
+            "allow_short": true,
+            "classification": true
+          },
+          "cost_sensitivity": [
+            {
+              "cost_bps": 0.0,
+              "sharpe_ratio": 3.8228371828053875,
+              "total_return": 0.06332033804643954,
+              "total_cost": 0.0,
+              "sortino_ratio": 4.030369210943483
+            },
+            {
+              "cost_bps": 2.0,
+              "sharpe_ratio": 3.0363122348355023,
+              "total_return": 0.050006554762629156,
+              "total_cost": 0.0126,
+              "sortino_ratio": 3.1921662123932877
+            },
+            {
+              "cost_bps": 5.0,
+              "sharpe_ratio": 1.8560960330439784,
+              "total_return": 0.030347791380333215,
+              "total_cost": 0.0315,
+              "sortino_ratio": 1.9466218766388272
+            },
+            {
+              "cost_bps": 10.0,
+              "sharpe_ratio": -0.09885620432949675,
+              "total_return": -0.0016023081503726544,
+              "total_cost": 0.063,
+              "sortino_ratio": -0.10261240773828569
+            },
+            {
+              "cost_bps": 20.0,
+              "sharpe_ratio": -3.880894158868757,
+              "total_return": -0.06256100309149806,
+              "total_cost": 0.126,
+              "sortino_ratio": -3.993361393166991
+            },
+            {
+              "cost_bps": 50.0,
+              "sharpe_ratio": -13.154638850903428,
+              "total_return": -0.22400064750969598,
+              "total_cost": 0.31500000000000006,
+              "sortino_ratio": -12.040265128005231
+            }
+          ],
+          "min_hold_sweep": [
+            {
+              "min_hold": 1,
+              "sharpe_ratio": -4.0847756991131074,
+              "sortino_ratio": -4.057876357710647,
+              "total_return": -0.0647525990970069,
+              "n_trades": 36,
+              "total_cost": 0.07100000000000001
+            },
+            {
+              "min_hold": 2,
+              "sharpe_ratio": -3.4119128557696956,
+              "sortino_ratio": -3.374046392183206,
+              "total_return": -0.05444485879194837,
+              "n_trades": 36,
+              "total_cost": 0.07100000000000001
+            },
+            {
+              "min_hold": 3,
+              "sharpe_ratio": -0.09885620432949675,
+              "sortino_ratio": -0.10261240773828569,
+              "total_return": -0.0016023081503726544,
+              "n_trades": 32,
+              "total_cost": 0.063
+            },
+            {
+              "min_hold": 5,
+              "sharpe_ratio": -5.978343510079452,
+              "sortino_ratio": -5.6395497625854345,
+              "total_return": -0.09219070748025188,
+              "n_trades": 26,
+              "total_cost": 0.051000000000000004
+            },
+            {
+              "min_hold": 10,
+              "sharpe_ratio": 0.948808525044876,
+              "sortino_ratio": 0.9763484716997902,
+              "total_return": 0.015336229442597637,
+              "n_trades": 19,
+              "total_cost": 0.037000000000000005
+            }
+          ]
+        },
+        "transformer_cls": {
+          "aggregate": {
+            "total_return": -0.08923951822730203,
+            "annualized_return": -2.211969697699683,
+            "sharpe_ratio": -5.810176967468393,
+            "sortino_ratio": -5.372838889120959,
+            "max_drawdown": 0.11238285522407471,
+            "calmar_ratio": -19.68244794358841,
+            "win_rate": 0.8880597014925373,
+            "n_trades": 30,
+            "total_cost": 0.059000000000000004,
+            "n_periods": 244,
+            "mean_period_return": -0.0003830956320227468,
+            "std_period_return": 0.00512771325431186
+          },
+          "baseline_buy_hold": {
+            "total_return": 0.013068403445732759,
+            "annualized_return": 0.3239250165565235,
+            "sharpe_ratio": 0.8072683337880571,
+            "sortino_ratio": 0.8046107560042167,
+            "max_drawdown": 0.08191532975188565,
+            "calmar_ratio": 3.9543882389006306,
+            "n_periods": 244
+          },
+          "significance_vs_baseline": {
+            "t_stat": -0.937728848180178,
+            "p_value": 0.34931484554542913,
+            "significant_5pct": false
+          },
+          "stability_ratio": 0.0,
+          "n_windows": 4,
+          "positive_windows": 0,
+          "window_sharpe_stats": {
+            "mean": -6.821456471352892,
+            "std": 5.773538714693361,
+            "min": -13.121319928998085,
+            "max": -0.04595622660487457
+          },
+          "walk_forward_config": {
+            "train_size": 212,
+            "test_size": 91,
+            "step_size": 91,
+            "purge_gap": 5,
+            "adaptive_window": true,
+            "interval": "1h",
+            "annualization_factor": 6048,
+            "min_holding_period": 3,
+            "allow_short": true,
+            "classification": true
+          },
+          "cost_sensitivity": [
+            {
+              "cost_bps": 0.0,
+              "sharpe_ratio": -2.144827486757008,
+              "total_return": -0.03388783069094307,
+              "total_cost": 0.0,
+              "sortino_ratio": -2.0018980516657385
+            },
+            {
+              "cost_bps": 2.0,
+              "sharpe_ratio": -2.882125914789572,
+              "total_return": -0.045220957339820525,
+              "total_cost": 0.011800000000000001,
+              "sortino_ratio": -2.705242661564875
+            },
+            {
+              "cost_bps": 5.0,
+              "sharpe_ratio": -3.9863223462484974,
+              "total_return": -0.061971863552919296,
+              "total_cost": 0.029500000000000002,
+              "sortino_ratio": -3.749256286498008
+            },
+            {
+              "cost_bps": 10.0,
+              "sharpe_ratio": -5.810176967468393,
+              "total_return": -0.08923951822730203,
+              "total_cost": 0.059000000000000004,
+              "sortino_ratio": -5.372838889120959
+            },
+            {
+              "cost_bps": 20.0,
+              "sharpe_ratio": -9.321114527125488,
+              "total_return": -0.14141992875209622,
+              "total_cost": 0.11800000000000001,
+              "sortino_ratio": -8.534722575214458
+            },
+            {
+              "cost_bps": 50.0,
+              "sharpe_ratio": -17.77473842161577,
+              "total_return": -0.28069897291419443,
+              "total_cost": 0.295,
+              "sortino_ratio": -15.011851083479247
+            }
+          ],
+          "min_hold_sweep": [
+            {
+              "min_hold": 1,
+              "sharpe_ratio": -12.658870056924611,
+              "sortino_ratio": -11.32970786868743,
+              "total_return": -0.18679544846875626,
+              "n_trades": 46,
+              "total_cost": 0.091
+            },
+            {
+              "min_hold": 2,
+              "sharpe_ratio": -11.079389587659056,
+              "sortino_ratio": -10.08701358809069,
+              "total_return": -0.16603418706058362,
+              "n_trades": 42,
+              "total_cost": 0.083
+            },
+            {
+              "min_hold": 3,
+              "sharpe_ratio": -5.810176967468393,
+              "sortino_ratio": -5.372838889120959,
+              "total_return": -0.08923951822730203,
+              "n_trades": 30,
+              "total_cost": 0.059000000000000004
+            },
+            {
+              "min_hold": 5,
+              "sharpe_ratio": -5.383949106956019,
+              "sortino_ratio": -4.791048540751975,
+              "total_return": -0.08355390848663723,
+              "n_trades": 24,
+              "total_cost": 0.047
+            },
+            {
+              "min_hold": 10,
+              "sharpe_ratio": -0.17216294622991798,
+              "sortino_ratio": -0.15952602910017707,
+              "total_return": -0.0027587263898015686,
+              "n_trades": 18,
+              "total_cost": 0.035
+            }
+          ]
+        },
+        "ensemble_equal": {
+          "aggregate": {
+            "total_return": 0.06371872329776909,
+            "annualized_return": 1.579388682397162,
+            "sharpe_ratio": 3.847921529126486,
+            "sortino_ratio": 4.433658942665756,
+            "max_drawdown": 0.07764824816729776,
+            "calmar_ratio": 20.340300260145924,
+            "win_rate": 1.796875,
+            "n_trades": 4,
+            "total_cost": 0.007,
+            "n_periods": 244,
+            "mean_period_return": 0.00025315982855705183,
+            "std_period_return": 0.0051165176577935715
+          },
+          "baseline_buy_hold": {
+            "total_return": 0.013068403445732759,
+            "annualized_return": 0.3239250165565235,
+            "sharpe_ratio": 0.8072683337880571,
+            "sortino_ratio": 0.8046107560042167,
+            "max_drawdown": 0.08191532975188565,
+            "calmar_ratio": 3.9543882389006306,
+            "n_periods": 244
+          },
+          "significance_vs_baseline": {
+            "t_stat": 0.38753566803674694,
+            "p_value": 0.6986989090613998,
+            "significant_5pct": false
+          },
+          "component_models": [
+            "lstm",
+            "transformer"
+          ],
+          "ensemble_method": "equal",
+          "ensemble_weights": {
+            "lstm": 0.5,
+            "transformer": 0.5
+          },
+          "cost_sensitivity": [
+            {
+              "cost_bps": 0.0,
+              "sharpe_ratio": 4.283332956832686,
+              "total_return": 0.07119087638539331,
+              "total_cost": 0.0,
+              "sortino_ratio": 4.94864449913778
+            },
+            {
+              "cost_bps": 2.0,
+              "sharpe_ratio": 4.196933763835824,
+              "total_return": 0.06969225843579274,
+              "total_cost": 0.0014000000000000002,
+              "sortino_ratio": 4.846200635583846
+            },
+            {
+              "cost_bps": 5.0,
+              "sharpe_ratio": 4.066662089917531,
+              "total_return": 0.06744826171430388,
+              "total_cost": 0.0035,
+              "sortino_ratio": 4.691976786503317
+            },
+            {
+              "cost_bps": 10.0,
+              "sharpe_ratio": 3.847921529126486,
+              "total_return": 0.06371872329776909,
+              "total_cost": 0.007,
+              "sortino_ratio": 4.433658942665756
+            },
+            {
+              "cost_bps": 20.0,
+              "sharpe_ratio": 3.4055605440272005,
+              "total_return": 0.05629869264041922,
+              "total_cost": 0.014,
+              "sortino_ratio": 3.9430519820511933
+            },
+            {
+              "cost_bps": 50.0,
+              "sharpe_ratio": 2.0639712032408033,
+              "total_return": 0.03434771208342515,
+              "total_cost": 0.035,
+              "sortino_ratio": 2.3345699171964007
+            }
+          ]
+        },
+        "ensemble_inverse_variance": {
+          "aggregate": {
+            "total_return": 0.06371872329776909,
+            "annualized_return": 1.579388682397162,
+            "sharpe_ratio": 3.847921529126486,
+            "sortino_ratio": 4.433658942665756,
+            "max_drawdown": 0.07764824816729776,
+            "calmar_ratio": 20.340300260145924,
+            "win_rate": 1.796875,
+            "n_trades": 4,
+            "total_cost": 0.007,
+            "n_periods": 244,
+            "mean_period_return": 0.00025315982855705183,
+            "std_period_return": 0.0051165176577935715
+          },
+          "baseline_buy_hold": {
+            "total_return": 0.013068403445732759,
+            "annualized_return": 0.3239250165565235,
+            "sharpe_ratio": 0.8072683337880571,
+            "sortino_ratio": 0.8046107560042167,
+            "max_drawdown": 0.08191532975188565,
+            "calmar_ratio": 3.9543882389006306,
+            "n_periods": 244
+          },
+          "significance_vs_baseline": {
+            "t_stat": 0.38753566803674694,
+            "p_value": 0.6986989090613998,
+            "significant_5pct": false
+          },
+          "component_models": [
+            "lstm",
+            "transformer"
+          ],
+          "ensemble_method": "inverse_variance",
+          "ensemble_weights": {
+            "lstm": 0.49984811013436536,
+            "transformer": 0.5001518898656345
+          },
+          "cost_sensitivity": [
+            {
+              "cost_bps": 0.0,
+              "sharpe_ratio": 4.283332956832686,
+              "total_return": 0.07119087638539331,
+              "total_cost": 0.0,
+              "sortino_ratio": 4.94864449913778
+            },
+            {
+              "cost_bps": 2.0,
+              "sharpe_ratio": 4.196933763835824,
+              "total_return": 0.06969225843579274,
+              "total_cost": 0.0014000000000000002,
+              "sortino_ratio": 4.846200635583846
+            },
+            {
+              "cost_bps": 5.0,
+              "sharpe_ratio": 4.066662089917531,
+              "total_return": 0.06744826171430388,
+              "total_cost": 0.0035,
+              "sortino_ratio": 4.691976786503317
+            },
+            {
+              "cost_bps": 10.0,
+              "sharpe_ratio": 3.847921529126486,
+              "total_return": 0.06371872329776909,
+              "total_cost": 0.007,
+              "sortino_ratio": 4.433658942665756
+            },
+            {
+              "cost_bps": 20.0,
+              "sharpe_ratio": 3.4055605440272005,
+              "total_return": 0.05629869264041922,
+              "total_cost": 0.014,
+              "sortino_ratio": 3.9430519820511933
+            },
+            {
+              "cost_bps": 50.0,
+              "sharpe_ratio": 2.0639712032408033,
+              "total_return": 0.03434771208342515,
+              "total_cost": 0.035,
+              "sortino_ratio": 2.3345699171964007
+            }
+          ]
+        }
+      }
+    },
+    "ETH/USDT": {
+      "n_samples": 686,
+      "n_features": 12,
+      "interval": "1h",
+      "data_summary": {
+        "ticker": "ETH/USDT",
+        "n_rows": 720,
+        "date_range": [
+          "2026-02-24 21:00:00",
+          "2026-03-26 20:00:00"
+        ],
+        "price_range": [
+          1842.45,
+          2361.21
+        ],
+        "mean_daily_return": 0.00015299072797973328,
+        "std_daily_return": 0.007317590740538474,
+        "annualized_volatility": 0.11616315177368267,
+        "skewness": 0.40732533696572587,
+        "kurtosis": 5.587233980498388,
+        "mean_volume": 18325.777158194443
+      },
+      "models": {
+        "lstm": {
+          "aggregate": {
+            "total_return": -0.10183696688632318,
+            "annualized_return": -2.524221212001978,
+            "sharpe_ratio": -5.371642962191151,
+            "sortino_ratio": -5.031605252096641,
+            "max_drawdown": 0.17030626380077532,
+            "calmar_ratio": -14.821658086251121,
+            "win_rate": 1.2857142857142858,
+            "n_trades": 19,
+            "total_cost": 0.037,
+            "n_periods": 244,
+            "mean_period_return": -0.0004401789992084281,
+            "std_period_return": 0.006372767456437633
+          },
+          "baseline_buy_hold": {
+            "total_return": 0.0012642169575714274,
+            "annualized_return": 0.03133600065324588,
+            "sharpe_ratio": 0.06357541610641625,
+            "sortino_ratio": 0.062483072706590405,
+            "max_drawdown": 0.11269497840835775,
+            "calmar_ratio": 0.27806031019144256,
+            "n_periods": 244
+          },
+          "significance_vs_baseline": {
+            "t_stat": -0.7185553664292768,
+            "p_value": 0.47310525967030376,
+            "significant_5pct": false
+          },
+          "stability_ratio": 0.25,
+          "n_windows": 4,
+          "positive_windows": 1,
+          "window_sharpe_stats": {
+            "mean": -4.887935704694392,
+            "std": 11.421725577782514,
+            "min": -21.675822426800664,
+            "max": 10.273969603290892
+          },
+          "walk_forward_config": {
+            "train_size": 212,
+            "test_size": 91,
+            "step_size": 91,
+            "purge_gap": 5,
+            "adaptive_window": true,
+            "interval": "1h",
+            "annualization_factor": 6048,
+            "min_holding_period": 3,
+            "allow_short": true,
+            "classification": false
+          },
+          "cost_sensitivity": [
+            {
+              "cost_bps": 0.0,
+              "sharpe_ratio": -3.5463563571499006,
+              "total_return": -0.06798248896310703,
+              "total_cost": 0.0,
+              "sortino_ratio": -3.3423446778040455
+            },
+            {
+              "cost_bps": 2.0,
+              "sharpe_ratio": -3.915641422188526,
+              "total_return": -0.07485396273502723,
+              "total_cost": 0.0074,
+              "sortino_ratio": -3.675891847496664
+            },
+            {
+              "cost_bps": 5.0,
+              "sharpe_ratio": -4.466052662710976,
+              "total_return": -0.08506630041955744,
+              "total_cost": 0.0185,
+              "sortino_ratio": -4.168476693076897
+            },
+            {
+              "cost_bps": 10.0,
+              "sharpe_ratio": -5.371642962191151,
+              "total_return": -0.10183696688632318,
+              "total_cost": 0.037,
+              "sortino_ratio": -5.031605252096641
+            },
+            {
+              "cost_bps": 20.0,
+              "sharpe_ratio": -7.123902630498841,
+              "total_return": -0.13446171933562803,
+              "total_cost": 0.074,
+              "sortino_ratio": -6.605378136930377
+            },
+            {
+              "cost_bps": 50.0,
+              "sharpe_ratio": -11.696364540398829,
+              "total_return": -0.22539625395204244,
+              "total_cost": 0.185,
+              "sortino_ratio": -10.398679037755306
+            }
+          ],
+          "min_hold_sweep": [
+            {
+              "min_hold": 1,
+              "sharpe_ratio": -8.074740390525426,
+              "sortino_ratio": -7.4485395447188125,
+              "total_return": -0.14939554065788985,
+              "n_trades": 19,
+              "total_cost": 0.037
+            },
+            {
+              "min_hold": 2,
+              "sharpe_ratio": -6.056495981964345,
+              "sortino_ratio": -5.695716193375302,
+              "total_return": -0.11425610612174314,
+              "n_trades": 19,
+              "total_cost": 0.037
+            },
+            {
+              "min_hold": 3,
+              "sharpe_ratio": -5.371642962191151,
+              "sortino_ratio": -5.031605252096641,
+              "total_return": -0.10183696688632318,
+              "n_trades": 19,
+              "total_cost": 0.037
+            },
+            {
+              "min_hold": 5,
+              "sharpe_ratio": -6.141438393179074,
+              "sortino_ratio": -5.837936304130538,
+              "total_return": -0.11583437804483196,
+              "n_trades": 19,
+              "total_cost": 0.037000000000000005
+            },
+            {
+              "min_hold": 10,
+              "sharpe_ratio": -9.681869087037615,
+              "sortino_ratio": -8.433695505509368,
+              "total_return": -0.17523409294264414,
+              "n_trades": 13,
+              "total_cost": 0.025
+            }
+          ]
+        },
+        "transformer": {
+          "aggregate": {
+            "total_return": -0.03263907444770981,
+            "annualized_return": -0.8090209928678236,
+            "sharpe_ratio": -1.6697513007594915,
+            "sortino_ratio": -1.541018334482956,
+            "max_drawdown": 0.10450716980693422,
+            "calmar_ratio": -7.741296548001472,
+            "win_rate": 0.8322147651006712,
+            "n_trades": 28,
+            "total_cost": 0.05500000000000001,
+            "n_periods": 244,
+            "mean_period_return": -0.0001359984041387644,
+            "std_period_return": 0.006334143717472535
+          },
+          "baseline_buy_hold": {
+            "total_return": 0.0012642169575714274,
+            "annualized_return": 0.03133600065324588,
+            "sharpe_ratio": 0.06357541610641625,
+            "sortino_ratio": 0.062483072706590405,
+            "max_drawdown": 0.11269497840835775,
+            "calmar_ratio": 0.27806031019144256,
+            "n_periods": 244
+          },
+          "significance_vs_baseline": {
+            "t_stat": -0.2756985722280171,
+            "p_value": 0.7830138972739804,
+            "significant_5pct": false
+          },
+          "stability_ratio": 0.25,
+          "n_windows": 4,
+          "positive_windows": 1,
+          "window_sharpe_stats": {
+            "mean": -1.7820792566927608,
+            "std": 6.980250289672927,
+            "min": -10.42064635410096,
+            "max": 8.984723190140832
+          },
+          "walk_forward_config": {
+            "train_size": 212,
+            "test_size": 91,
+            "step_size": 91,
+            "purge_gap": 5,
+            "adaptive_window": true,
+            "interval": "1h",
+            "annualization_factor": 6048,
+            "min_holding_period": 3,
+            "allow_short": true,
+            "classification": false
+          },
+          "cost_sensitivity": [
+            {
+              "cost_bps": 0.0,
+              "sharpe_ratio": 1.0978982852963493,
+              "total_return": 0.022056106896071737,
+              "total_cost": 0.0,
+              "sortino_ratio": 1.0221366445199958
+            },
+            {
+              "cost_bps": 2.0,
+              "sharpe_ratio": 0.544746573160306,
+              "total_return": 0.010875098010696745,
+              "total_cost": 0.011000000000000001,
+              "sortino_ratio": 0.5067019872330543
+            },
+            {
+              "cost_bps": 5.0,
+              "sharpe_ratio": -0.2863613657247489,
+              "total_return": -0.005667489451665159,
+              "total_cost": 0.027500000000000004,
+              "sortino_ratio": -0.26656869140311157
+            },
+            {
+              "cost_bps": 10.0,
+              "sharpe_ratio": -1.6697513007594915,
+              "total_return": -0.03263907444770981,
+              "total_cost": 0.05500000000000001,
+              "sortino_ratio": -1.541018334482956
+            },
+            {
+              "cost_bps": 20.0,
+              "sharpe_ratio": -4.393616420320513,
+              "total_return": -0.08440725125422154,
+              "total_cost": 0.11000000000000001,
+              "sortino_ratio": -4.000229926625745
+            },
+            {
+              "cost_bps": 50.0,
+              "sharpe_ratio": -11.638080662781991,
+              "total_return": -0.22367467282990547,
+              "total_cost": 0.275,
+              "sortino_ratio": -9.946023589342477
+            }
+          ],
+          "min_hold_sweep": [
+            {
+              "min_hold": 1,
+              "sharpe_ratio": -1.9707980164434131,
+              "sortino_ratio": -1.8254135372457263,
+              "total_return": -0.03838029205183898,
+              "n_trades": 36,
+              "total_cost": 0.07100000000000001
+            },
+            {
+              "min_hold": 2,
+              "sharpe_ratio": -3.0830250915934725,
+              "sortino_ratio": -2.814678667687038,
+              "total_return": -0.05951800743020736,
+              "n_trades": 30,
+              "total_cost": 0.059000000000000004
+            },
+            {
+              "min_hold": 3,
+              "sharpe_ratio": -1.6697513007594915,
+              "sortino_ratio": -1.541018334482956,
+              "total_return": -0.03263907444770981,
+              "n_trades": 28,
+              "total_cost": 0.05500000000000001
+            },
+            {
+              "min_hold": 5,
+              "sharpe_ratio": -3.3161683935013673,
+              "sortino_ratio": -3.0736552858564408,
+              "total_return": -0.06404254665830392,
+              "n_trades": 22,
+              "total_cost": 0.043
+            },
+            {
+              "min_hold": 10,
+              "sharpe_ratio": 1.5759372135467038,
+              "sortino_ratio": 1.4870280168412278,
+              "total_return": 0.031790521445171624,
+              "n_trades": 15,
+              "total_cost": 0.029
+            }
+          ]
+        },
+        "lstm_cls": {
+          "aggregate": {
+            "total_return": -0.15798941530165508,
+            "annualized_return": -3.9160655071492214,
+            "sharpe_ratio": -8.627451218320008,
+            "sortino_ratio": -7.683255981079737,
+            "max_drawdown": 0.17819967628011438,
+            "calmar_ratio": -21.975716167932354,
+            "win_rate": 0.8695652173913043,
+            "n_trades": 18,
+            "total_cost": 0.035,
+            "n_periods": 244,
+            "mean_period_return": -0.0007047651390089191,
+            "std_period_return": 0.006352838172407867
+          },
+          "baseline_buy_hold": {
+            "total_return": 0.0012642169575714274,
+            "annualized_return": 0.03133600065324588,
+            "sharpe_ratio": 0.06357541610641625,
+            "sortino_ratio": 0.062483072706590405,
+            "max_drawdown": 0.11269497840835775,
+            "calmar_ratio": 0.27806031019144256,
+            "n_periods": 244
+          },
+          "significance_vs_baseline": {
+            "t_stat": -1.2841629971483588,
+            "p_value": 0.2003079183345334,
+            "significant_5pct": false
+          },
+          "stability_ratio": 0.0,
+          "n_windows": 4,
+          "positive_windows": 0,
+          "window_sharpe_stats": {
+            "mean": -8.914089566174493,
+            "std": 4.933726623018658,
+            "min": -17.112241524797245,
+            "max": -4.769566721499871
+          },
+          "walk_forward_config": {
+            "train_size": 212,
+            "test_size": 91,
+            "step_size": 91,
+            "purge_gap": 5,
+            "adaptive_window": true,
+            "interval": "1h",
+            "annualization_factor": 6048,
+            "min_holding_period": 3,
+            "allow_short": true,
+            "classification": true
+          },
+          "cost_sensitivity": [
+            {
+              "cost_bps": 0.0,
+              "sharpe_ratio": -6.919111825420113,
+              "total_return": -0.1279972434684995,
+              "total_cost": 0.0,
+              "sortino_ratio": -6.168655605481623
+            },
+            {
+              "cost_bps": 2.0,
+              "sharpe_ratio": -7.266463531614106,
+              "total_return": -0.1340799484590613,
+              "total_cost": 0.007000000000000001,
+              "sortino_ratio": -6.487243407401232
+            },
+            {
+              "cost_bps": 5.0,
+              "sharpe_ratio": -7.782551827530233,
+              "total_return": -0.14312454178821457,
+              "total_cost": 0.0175,
+              "sortino_ratio": -6.948424920060304
+            },
+            {
+              "cost_bps": 10.0,
+              "sharpe_ratio": -8.627451218320008,
+              "total_return": -0.15798941530165508,
+              "total_cost": 0.035,
+              "sortino_ratio": -7.683255981079737
+            },
+            {
+              "cost_bps": 20.0,
+              "sharpe_ratio": -10.247446923533518,
+              "total_return": -0.1869500188690777,
+              "total_cost": 0.07,
+              "sortino_ratio": -9.148479861430735
+            },
+            {
+              "cost_bps": 50.0,
+              "sharpe_ratio": -14.3788757866879,
+              "total_return": -0.2679911638995302,
+              "total_cost": 0.175,
+              "sortino_ratio": -12.33446541566182
+            }
+          ],
+          "min_hold_sweep": [
+            {
+              "min_hold": 1,
+              "sharpe_ratio": -8.730211670509874,
+              "sortino_ratio": -7.805027099742136,
+              "total_return": -0.1595604692116723,
+              "n_trades": 18,
+              "total_cost": 0.035
+            },
+            {
+              "min_hold": 2,
+              "sharpe_ratio": -8.390503803825698,
+              "sortino_ratio": -7.484103481925907,
+              "total_return": -0.15384352185604033,
+              "n_trades": 18,
+              "total_cost": 0.035
+            },
+            {
+              "min_hold": 3,
+              "sharpe_ratio": -8.627451218320008,
+              "sortino_ratio": -7.683255981079737,
+              "total_return": -0.15798941530165508,
+              "n_trades": 18,
+              "total_cost": 0.035
+            },
+            {
+              "min_hold": 5,
+              "sharpe_ratio": -5.885442004235415,
+              "sortino_ratio": -5.483769697124561,
+              "total_return": -0.11116711978178671,
+              "n_trades": 18,
+              "total_cost": 0.035
+            },
+            {
+              "min_hold": 10,
+              "sharpe_ratio": -9.408845664545167,
+              "sortino_ratio": -8.545665107529652,
+              "total_return": -0.17021068246696364,
+              "n_trades": 14,
+              "total_cost": 0.027000000000000003
+            }
+          ]
+        },
+        "transformer_cls": {
+          "aggregate": {
+            "total_return": -0.0991284579205799,
+            "annualized_return": -2.4570857110806035,
+            "sharpe_ratio": -5.230103380033981,
+            "sortino_ratio": -5.170759311167117,
+            "max_drawdown": 0.17380346010288183,
+            "calmar_ratio": -14.137150719704588,
+            "win_rate": 1.1734693877551021,
+            "n_trades": 24,
+            "total_cost": 0.047,
+            "n_periods": 244,
+            "mean_period_return": -0.0004278385415864605,
+            "std_period_return": 0.006361734246535273
+          },
+          "baseline_buy_hold": {
+            "total_return": 0.0012642169575714274,
+            "annualized_return": 0.03133600065324588,
+            "sharpe_ratio": 0.06357541610641625,
+            "sortino_ratio": 0.062483072706590405,
+            "max_drawdown": 0.11269497840835775,
+            "calmar_ratio": 0.27806031019144256,
+            "n_periods": 244
+          },
+          "significance_vs_baseline": {
+            "t_stat": -0.7144230306448437,
+            "p_value": 0.4756513513199705,
+            "significant_5pct": false
+          },
+          "stability_ratio": 0.25,
+          "n_windows": 4,
+          "positive_windows": 1,
+          "window_sharpe_stats": {
+            "mean": -5.296909569031537,
+            "std": 6.3842287690196855,
+            "min": -15.528268321102791,
+            "max": 2.004782826540273
+          },
+          "walk_forward_config": {
+            "train_size": 212,
+            "test_size": 91,
+            "step_size": 91,
+            "purge_gap": 5,
+            "adaptive_window": true,
+            "interval": "1h",
+            "annualization_factor": 6048,
+            "min_holding_period": 3,
+            "allow_short": true,
+            "classification": true
+          },
+          "cost_sensitivity": [
+            {
+              "cost_bps": 0.0,
+              "sharpe_ratio": -2.889958096484057,
+              "total_return": -0.05577670939303064,
+              "total_cost": 0.0,
+              "sortino_ratio": -2.8887410623336147
+            },
+            {
+              "cost_bps": 2.0,
+              "sharpe_ratio": -3.3621814511526584,
+              "total_return": -0.0646108229426261,
+              "total_cost": 0.0094,
+              "sortino_ratio": -3.35624377574862
+            },
+            {
+              "cost_bps": 5.0,
+              "sharpe_ratio": -4.067320863581177,
+              "total_return": -0.07770726345893578,
+              "total_cost": 0.0235,
+              "sortino_ratio": -4.0437179916451145
+            },
+            {
+              "cost_bps": 10.0,
+              "sharpe_ratio": -5.230103380033981,
+              "total_return": -0.0991284579205799,
+              "total_cost": 0.047,
+              "sortino_ratio": -5.170759311167117
+            },
+            {
+              "cost_bps": 20.0,
+              "sharpe_ratio": -7.484234781433913,
+              "total_return": -0.14048981485422155,
+              "total_cost": 0.094,
+              "sortino_ratio": -7.338713311925684
+            },
+            {
+              "cost_bps": 50.0,
+              "sharpe_ratio": -13.31587449077249,
+              "total_return": -0.25352459090560775,
+              "total_cost": 0.235,
+              "sortino_ratio": -12.023716255890147
+            }
+          ],
+          "min_hold_sweep": [
+            {
+              "min_hold": 1,
+              "sharpe_ratio": -5.09438649763377,
+              "sortino_ratio": -5.2828805060539406,
+              "total_return": -0.09762103042979392,
+              "n_trades": 38,
+              "total_cost": 0.07500000000000001
+            },
+            {
+              "min_hold": 2,
+              "sharpe_ratio": -4.993453860219517,
+              "sortino_ratio": -5.065967681730724,
+              "total_return": -0.0959458096181177,
+              "n_trades": 29,
+              "total_cost": 0.056999999999999995
+            },
+            {
+              "min_hold": 3,
+              "sharpe_ratio": -5.230103380033981,
+              "sortino_ratio": -5.170759311167117,
+              "total_return": -0.0991284579205799,
+              "n_trades": 24,
+              "total_cost": 0.047
+            },
+            {
+              "min_hold": 5,
+              "sharpe_ratio": -3.5256528657771664,
+              "sortino_ratio": -3.800873984832057,
+              "total_return": -0.0684696092341682,
+              "n_trades": 18,
+              "total_cost": 0.035
+            },
+            {
+              "min_hold": 10,
+              "sharpe_ratio": -8.33624505096324,
+              "sortino_ratio": -8.6646039382396,
+              "total_return": -0.15337562210298272,
+              "n_trades": 13,
+              "total_cost": 0.025
+            }
+          ]
+        },
+        "ensemble_equal": {
+          "aggregate": {
+            "total_return": -0.17949522903749457,
+            "annualized_return": -4.449127644339209,
+            "sharpe_ratio": -9.946197768507124,
+            "sortino_ratio": -8.909636242281362,
+            "max_drawdown": 0.21897563991094723,
+            "calmar_ratio": -20.317911372007295,
+            "win_rate": 0.7986111111111112,
+            "n_trades": 26,
+            "total_cost": 0.051000000000000004,
+            "n_periods": 244,
+            "mean_period_return": -0.0008108014498667565,
+            "std_period_return": 0.006339621322774012
+          },
+          "baseline_buy_hold": {
+            "total_return": 0.0012642169575714274,
+            "annualized_return": 0.03133600065324588,
+            "sharpe_ratio": 0.06357541610641625,
+            "sortino_ratio": 0.062483072706590405,
+            "max_drawdown": 0.11269497840835775,
+            "calmar_ratio": 0.27806031019144256,
+            "n_periods": 244
+          },
+          "significance_vs_baseline": {
+            "t_stat": -1.4256837138046503,
+            "p_value": 0.15524294961596805,
+            "significant_5pct": false
+          },
+          "component_models": [
+            "lstm",
+            "transformer"
+          ],
+          "ensemble_method": "equal",
+          "ensemble_weights": {
+            "lstm": 0.5,
+            "transformer": 0.5
+          },
+          "cost_sensitivity": [
+            {
+              "cost_bps": 0.0,
+              "sharpe_ratio": -7.422260215640923,
+              "total_return": -0.13656404546806375,
+              "total_cost": 0.0,
+              "sortino_ratio": -6.719211016682516
+            },
+            {
+              "cost_bps": 2.0,
+              "sharpe_ratio": -7.935120859681696,
+              "total_return": -0.14532632859149705,
+              "total_cost": 0.0102,
+              "sortino_ratio": -7.185834571142867
+            },
+            {
+              "cost_bps": 5.0,
+              "sharpe_ratio": -8.697690346653452,
+              "total_return": -0.15830330871862244,
+              "total_cost": 0.025500000000000002,
+              "sortino_ratio": -7.864075103422047
+            },
+            {
+              "cost_bps": 10.0,
+              "sharpe_ratio": -9.946197768507124,
+              "total_return": -0.17949522903749457,
+              "total_cost": 0.051000000000000004,
+              "sortino_ratio": -8.909636242281362
+            },
+            {
+              "cost_bps": 20.0,
+              "sharpe_ratio": -12.331492799586298,
+              "total_return": -0.22029181708423687,
+              "total_cost": 0.10200000000000001,
+              "sortino_ratio": -10.961745756970918
+            },
+            {
+              "cost_bps": 50.0,
+              "sharpe_ratio": -18.235542939316094,
+              "total_return": -0.33090923390042887,
+              "total_cost": 0.255,
+              "sortino_ratio": -15.477418368795542
+            }
+          ]
+        },
+        "ensemble_inverse_variance": {
+          "aggregate": {
+            "total_return": -0.17949522903749457,
+            "annualized_return": -4.449127644339209,
+            "sharpe_ratio": -9.946197768507124,
+            "sortino_ratio": -8.909636242281362,
+            "max_drawdown": 0.21897563991094723,
+            "calmar_ratio": -20.317911372007295,
+            "win_rate": 0.7986111111111112,
+            "n_trades": 26,
+            "total_cost": 0.051000000000000004,
+            "n_periods": 244,
+            "mean_period_return": -0.0008108014498667565,
+            "std_period_return": 0.006339621322774012
+          },
+          "baseline_buy_hold": {
+            "total_return": 0.0012642169575714274,
+            "annualized_return": 0.03133600065324588,
+            "sharpe_ratio": 0.06357541610641625,
+            "sortino_ratio": 0.062483072706590405,
+            "max_drawdown": 0.11269497840835775,
+            "calmar_ratio": 0.27806031019144256,
+            "n_periods": 244
+          },
+          "significance_vs_baseline": {
+            "t_stat": -1.4256837138046503,
+            "p_value": 0.15524294961596805,
+            "significant_5pct": false
+          },
+          "component_models": [
+            "lstm",
+            "transformer"
+          ],
+          "ensemble_method": "inverse_variance",
+          "ensemble_weights": {
+            "lstm": 0.4969604428966218,
+            "transformer": 0.5030395571033781
+          },
+          "cost_sensitivity": [
+            {
+              "cost_bps": 0.0,
+              "sharpe_ratio": -7.422260215640923,
+              "total_return": -0.13656404546806375,
+              "total_cost": 0.0,
+              "sortino_ratio": -6.719211016682516
+            },
+            {
+              "cost_bps": 2.0,
+              "sharpe_ratio": -7.935120859681696,
+              "total_return": -0.14532632859149705,
+              "total_cost": 0.0102,
+              "sortino_ratio": -7.185834571142867
+            },
+            {
+              "cost_bps": 5.0,
+              "sharpe_ratio": -8.697690346653452,
+              "total_return": -0.15830330871862244,
+              "total_cost": 0.025500000000000002,
+              "sortino_ratio": -7.864075103422047
+            },
+            {
+              "cost_bps": 10.0,
+              "sharpe_ratio": -9.946197768507124,
+              "total_return": -0.17949522903749457,
+              "total_cost": 0.051000000000000004,
+              "sortino_ratio": -8.909636242281362
+            },
+            {
+              "cost_bps": 20.0,
+              "sharpe_ratio": -12.331492799586298,
+              "total_return": -0.22029181708423687,
+              "total_cost": 0.10200000000000001,
+              "sortino_ratio": -10.961745756970918
+            },
+            {
+              "cost_bps": 50.0,
+              "sharpe_ratio": -18.235542939316094,
+              "total_return": -0.33090923390042887,
+              "total_cost": 0.255,
+              "sortino_ratio": -15.477418368795542
+            }
+          ]
+        }
+      }
+    },
+    "AAPL": {
+      "n_samples": 1222,
+      "n_features": 12,
+      "interval": "1d",
+      "data_summary": {
+        "ticker": "AAPL",
+        "n_rows": 1256,
+        "date_range": [
+          "2021-03-26 00:00:00",
+          "2026-03-26 00:00:00"
+        ],
+        "price_range": [
+          116.78206634521484,
+          285.9224548339844
+        ],
+        "mean_daily_return": 0.0006163294036138134,
+        "std_daily_return": 0.01722723019100657,
+        "annualized_volatility": 0.2734738011832028,
+        "skewness": 0.243706421305607,
+        "kurtosis": 5.9688080890255675,
+        "mean_volume": 66907698.63773885
+      },
+      "models": {
+        "lstm": {
+          "aggregate": {
+            "total_return": 0.04754663465287614,
+            "annualized_return": 0.02377331732643807,
+            "sharpe_ratio": 0.0852611379771837,
+            "sortino_ratio": 0.08829155441666219,
+            "max_drawdown": 0.3836707048577505,
+            "calmar_ratio": 0.06196281609577736,
+            "win_rate": 0.7732919254658385,
+            "n_trades": 50,
+            "total_cost": 0.099,
+            "n_periods": 504,
+            "mean_period_return": 9.21644678138591e-05,
+            "std_period_return": 0.017159817520897402
+          },
+          "baseline_buy_hold": {
+            "total_return": 0.2102585499083515,
+            "annualized_return": 0.10512927495417575,
+            "sharpe_ratio": 0.34969261683289055,
+            "sortino_ratio": 0.3306139360483088,
+            "max_drawdown": 0.40587291129301883,
+            "calmar_ratio": 0.2590201810198611,
+            "n_periods": 504
+          },
+          "significance_vs_baseline": {
+            "t_stat": -0.43641082521748004,
+            "p_value": 0.6627259427639586,
+            "significant_5pct": false
+          },
+          "stability_ratio": 0.6666666666666666,
+          "n_windows": 3,
+          "positive_windows": 2,
+          "window_sharpe_stats": {
+            "mean": 0.2822082062064674,
+            "std": 1.1156798927828686,
+            "min": -1.2933162119111419,
+            "max": 1.1434859964461768
+          },
+          "walk_forward_config": {
+            "train_size": 461,
+            "test_size": 198,
+            "step_size": 198,
+            "purge_gap": 5,
+            "adaptive_window": true,
+            "interval": "1d",
+            "annualization_factor": 252,
+            "min_holding_period": 3,
+            "allow_short": true,
+            "classification": false
+          },
+          "cost_sensitivity": [
+            {
+              "cost_bps": 0.0,
+              "sharpe_ratio": 0.2665222201740817,
+              "total_return": 0.15656093653656097,
+              "total_cost": 0.0,
+              "sortino_ratio": 0.27637794332162885
+            },
+            {
+              "cost_bps": 2.0,
+              "sharpe_ratio": 0.2303413311295242,
+              "total_return": 0.13388625016537534,
+              "total_cost": 0.0198,
+              "sortino_ratio": 0.2389865098793243
+            },
+            {
+              "cost_bps": 5.0,
+              "sharpe_ratio": 0.1759951090938678,
+              "total_return": 0.10070500900098257,
+              "total_cost": 0.0495,
+              "sortino_ratio": 0.18256210135581305
+            },
+            {
+              "cost_bps": 10.0,
+              "sharpe_ratio": 0.0852611379771837,
+              "total_return": 0.04754663465287614,
+              "total_cost": 0.099,
+              "sortino_ratio": 0.08829155441666219
+            },
+            {
+              "cost_bps": 20.0,
+              "sharpe_ratio": -0.09650376181613417,
+              "total_return": -0.05119227434854915,
+              "total_cost": 0.198,
+              "sortino_ratio": -0.09977019024696075
+            },
+            {
+              "cost_bps": 50.0,
+              "sharpe_ratio": -0.6383310504197934,
+              "total_return": -0.2949941005719393,
+              "total_cost": 0.49500000000000005,
+              "sortino_ratio": -0.6551910851961881
+            }
+          ],
+          "min_hold_sweep": [
+            {
+              "min_hold": 1,
+              "sharpe_ratio": -0.45946488889798615,
+              "sortino_ratio": -0.46356073431282063,
+              "total_return": -0.2218182271820746,
+              "n_trades": 68,
+              "total_cost": 0.135
+            },
+            {
+              "min_hold": 2,
+              "sharpe_ratio": -0.2660780045560959,
+              "sortino_ratio": -0.26910659065687065,
+              "total_return": -0.13513303235164387,
+              "n_trades": 62,
+              "total_cost": 0.123
+            },
+            {
+              "min_hold": 3,
+              "sharpe_ratio": 0.0852611379771837,
+              "sortino_ratio": 0.08829155441666219,
+              "total_return": 0.04754663465287614,
+              "n_trades": 50,
+              "total_cost": 0.099
+            },
+            {
+              "min_hold": 5,
+              "sharpe_ratio": 0.18537450643716677,
+              "sortino_ratio": 0.1915549910533221,
+              "total_return": 0.10635801478523343,
+              "n_trades": 41,
+              "total_cost": 0.081
+            },
+            {
+              "min_hold": 10,
+              "sharpe_ratio": -0.12374396575676318,
+              "sortino_ratio": -0.1197282042286604,
+              "total_return": -0.06533963579369055,
+              "n_trades": 32,
+              "total_cost": 0.063
+            }
+          ]
+        },
+        "transformer": {
+          "aggregate": {
+            "total_return": 0.09538141331249121,
+            "annualized_return": 0.047690706656245606,
+            "sharpe_ratio": 0.1670473248509795,
+            "sortino_ratio": 0.16589554626119846,
+            "max_drawdown": 0.3712942281353455,
+            "calmar_ratio": 0.1284445139256547,
+            "win_rate": 1.1534883720930234,
+            "n_trades": 33,
+            "total_cost": 0.065,
+            "n_periods": 504,
+            "mean_period_return": 0.00018075917713892718,
+            "std_period_return": 0.017177545237395724
+          },
+          "baseline_buy_hold": {
+            "total_return": 0.2102585499083515,
+            "annualized_return": 0.10512927495417575,
+            "sharpe_ratio": 0.34969261683289055,
+            "sortino_ratio": 0.3306139360483088,
+            "max_drawdown": 0.40587291129301883,
+            "calmar_ratio": 0.2590201810198611,
+            "n_periods": 504
+          },
+          "significance_vs_baseline": {
+            "t_stat": -0.14859933127788294,
+            "p_value": 0.8819293545462125,
+            "significant_5pct": false
+          },
+          "stability_ratio": 0.6666666666666666,
+          "n_windows": 3,
+          "positive_windows": 2,
+          "window_sharpe_stats": {
+            "mean": 0.27232388923063555,
+            "std": 0.3193825494184976,
+            "min": -0.015031489960027719,
+            "max": 0.7177928706937597
+          },
+          "walk_forward_config": {
+            "train_size": 461,
+            "test_size": 198,
+            "step_size": 198,
+            "purge_gap": 5,
+            "adaptive_window": true,
+            "interval": "1d",
+            "annualization_factor": 252,
+            "min_holding_period": 3,
+            "allow_short": true,
+            "classification": false
+          },
+          "cost_sensitivity": [
+            {
+              "cost_bps": 0.0,
+              "sharpe_ratio": 0.28604643171839017,
+              "total_return": 0.16894616035913615,
+              "total_cost": 0.0,
+              "sortino_ratio": 0.2843281748931653
+            },
+            {
+              "cost_bps": 2.0,
+              "sharpe_ratio": 0.2622759762915785,
+              "total_return": 0.15384820958338427,
+              "total_cost": 0.013000000000000001,
+              "sortino_ratio": 0.26044430802656454
+            },
+            {
+              "cost_bps": 5.0,
+              "sharpe_ratio": 0.22658916319703157,
+              "total_return": 0.13156612587174973,
+              "total_cost": 0.0325,
+              "sortino_ratio": 0.22512262228119007
+            },
+            {
+              "cost_bps": 10.0,
+              "sharpe_ratio": 0.1670473248509795,
+              "total_return": 0.09538141331249121,
+              "total_cost": 0.065,
+              "sortino_ratio": 0.16589554626119846
+            },
+            {
+              "cost_bps": 20.0,
+              "sharpe_ratio": 0.04785453280742682,
+              "total_return": 0.026446282403491252,
+              "total_cost": 0.13,
+              "sortino_ratio": 0.04758023333392025
+            },
+            {
+              "cost_bps": 50.0,
+              "sharpe_ratio": -0.3080010225461136,
+              "total_return": -0.155404424205652,
+              "total_cost": 0.325,
+              "sortino_ratio": -0.305936303236395
+            }
+          ],
+          "min_hold_sweep": [
+            {
+              "min_hold": 1,
+              "sharpe_ratio": -0.10561857086497604,
+              "sortino_ratio": -0.10521572430578845,
+              "total_return": -0.056072557085221075,
+              "n_trades": 43,
+              "total_cost": 0.08499999999999999
+            },
+            {
+              "min_hold": 2,
+              "sharpe_ratio": 0.10037531137128171,
+              "sortino_ratio": 0.10106775495892546,
+              "total_return": 0.05629701039854183,
+              "n_trades": 37,
+              "total_cost": 0.07300000000000001
+            },
+            {
+              "min_hold": 3,
+              "sharpe_ratio": 0.1670473248509795,
+              "sortino_ratio": 0.16589554626119846,
+              "total_return": 0.09538141331249121,
+              "n_trades": 33,
+              "total_cost": 0.065
+            },
+            {
+              "min_hold": 5,
+              "sharpe_ratio": 0.11756042108906477,
+              "sortino_ratio": 0.1191879041588734,
+              "total_return": 0.06617884643656087,
+              "n_trades": 27,
+              "total_cost": 0.053000000000000005
+            },
+            {
+              "min_hold": 10,
+              "sharpe_ratio": -0.05850099396582857,
+              "sortino_ratio": -0.05852690549735673,
+              "total_return": -0.03144726719365196,
+              "n_trades": 19,
+              "total_cost": 0.037
+            }
+          ]
+        },
+        "lstm_cls": {
+          "aggregate": {
+            "total_return": -0.427462933080919,
+            "annualized_return": -0.2137314665404595,
+            "sharpe_ratio": -1.0211597387897238,
+            "sortino_ratio": -1.0265730928644816,
+            "max_drawdown": 0.6841375182467492,
+            "calmar_ratio": -0.3124100942281206,
+            "win_rate": 0.717391304347826,
+            "n_trades": 61,
+            "total_cost": 0.12100000000000001,
+            "n_periods": 504,
+            "mean_period_return": -0.0011065035713084725,
+            "std_period_return": 0.017201226193798526
+          },
+          "baseline_buy_hold": {
+            "total_return": 0.2102585499083515,
+            "annualized_return": 0.10512927495417575,
+            "sharpe_ratio": 0.34969261683289055,
+            "sortino_ratio": 0.3306139360483088,
+            "max_drawdown": 0.40587291129301883,
+            "calmar_ratio": 0.2590201810198611,
+            "n_periods": 504
+          },
+          "significance_vs_baseline": {
+            "t_stat": -2.261196361168408,
+            "p_value": 0.02417342176701616,
+            "significant_5pct": true
+          },
+          "stability_ratio": 0.0,
+          "n_windows": 3,
+          "positive_windows": 0,
+          "window_sharpe_stats": {
+            "mean": -1.003683883851896,
+            "std": 0.22498924195454492,
+            "min": -1.3218655476474541,
+            "max": -0.8438446462226382
+          },
+          "walk_forward_config": {
+            "train_size": 461,
+            "test_size": 198,
+            "step_size": 198,
+            "purge_gap": 5,
+            "adaptive_window": true,
+            "interval": "1d",
+            "annualization_factor": 252,
+            "min_holding_period": 3,
+            "allow_short": true,
+            "classification": true
+          },
+          "cost_sensitivity": [
+            {
+              "cost_bps": 0.0,
+              "sharpe_ratio": -0.8010676647292682,
+              "total_return": -0.35382040302139617,
+              "total_cost": 0.0,
+              "sortino_ratio": -0.8082844082770694
+            },
+            {
+              "cost_bps": 2.0,
+              "sharpe_ratio": -0.8452469692233125,
+              "total_return": -0.3692702520976804,
+              "total_cost": 0.024200000000000003,
+              "sortino_ratio": -0.8528716521998164
+            },
+            {
+              "cost_bps": 5.0,
+              "sharpe_ratio": -0.9113766188595196,
+              "total_return": -0.3917551716972156,
+              "total_cost": 0.060500000000000005,
+              "sortino_ratio": -0.9187546782217192
+            },
+            {
+              "cost_bps": 10.0,
+              "sharpe_ratio": -1.0211597387897238,
+              "total_return": -0.427462933080919,
+              "total_cost": 0.12100000000000001,
+              "sortino_ratio": -1.0265730928644816
+            },
+            {
+              "cost_bps": 20.0,
+              "sharpe_ratio": -1.2386967343769397,
+              "total_return": -0.49271271558399554,
+              "total_cost": 0.24200000000000002,
+              "sortino_ratio": -1.2472698855477213
+            },
+            {
+              "cost_bps": 50.0,
+              "sharpe_ratio": -1.8675917784806997,
+              "total_return": -0.6471378470736303,
+              "total_cost": 0.605,
+              "sortino_ratio": -1.8557123486506402
+            }
+          ],
+          "min_hold_sweep": [
+            {
+              "min_hold": 1,
+              "sharpe_ratio": -1.246933645955811,
+              "sortino_ratio": -1.2224296420710545,
+              "total_return": -0.49383541558064875,
+              "n_trades": 73,
+              "total_cost": 0.14500000000000002
+            },
+            {
+              "min_hold": 2,
+              "sharpe_ratio": -0.9069448587514357,
+              "sortino_ratio": -0.9007375487396447,
+              "total_return": -0.3905525939086642,
+              "n_trades": 65,
+              "total_cost": 0.129
+            },
+            {
+              "min_hold": 3,
+              "sharpe_ratio": -1.0211597387897238,
+              "sortino_ratio": -1.0265730928644816,
+              "total_return": -0.427462933080919,
+              "n_trades": 61,
+              "total_cost": 0.12100000000000001
+            },
+            {
+              "min_hold": 5,
+              "sharpe_ratio": -1.0505355186246188,
+              "sortino_ratio": -1.066023564705711,
+              "total_return": -0.43631452130372905,
+              "n_trades": 51,
+              "total_cost": 0.10099999999999999
+            },
+            {
+              "min_hold": 10,
+              "sharpe_ratio": -0.549898033375997,
+              "sortino_ratio": -0.5569761100220408,
+              "total_return": -0.25957435827527564,
+              "n_trades": 31,
+              "total_cost": 0.061000000000000006
+            }
+          ]
+        },
+        "transformer_cls": {
+          "aggregate": {
+            "total_return": -0.06529350144907829,
+            "annualized_return": -0.032646750724539146,
+            "sharpe_ratio": -0.123736762893126,
+            "sortino_ratio": -0.13052643596833363,
+            "max_drawdown": 0.34272309543991364,
+            "calmar_ratio": -0.09525693237169885,
+            "win_rate": 0.8848920863309353,
+            "n_trades": 71,
+            "total_cost": 0.14100000000000001,
+            "n_periods": 504,
+            "mean_period_return": -0.00013397361957373266,
+            "std_period_return": 0.017187820564277752
+          },
+          "baseline_buy_hold": {
+            "total_return": 0.2102585499083515,
+            "annualized_return": 0.10512927495417575,
+            "sharpe_ratio": 0.34969261683289055,
+            "sortino_ratio": 0.3306139360483088,
+            "max_drawdown": 0.40587291129301883,
+            "calmar_ratio": 0.2590201810198611,
+            "n_periods": 504
+          },
+          "significance_vs_baseline": {
+            "t_stat": -0.6058912231975384,
+            "p_value": 0.5448602909448732,
+            "significant_5pct": false
+          },
+          "stability_ratio": 0.3333333333333333,
+          "n_windows": 3,
+          "positive_windows": 1,
+          "window_sharpe_stats": {
+            "mean": -0.05988644049167135,
+            "std": 0.1530558535265961,
+            "min": -0.19573314647834725,
+            "max": 0.1539766117015741
+          },
+          "walk_forward_config": {
+            "train_size": 461,
+            "test_size": 198,
+            "step_size": 198,
+            "purge_gap": 5,
+            "adaptive_window": true,
+            "interval": "1d",
+            "annualization_factor": 252,
+            "min_holding_period": 3,
+            "allow_short": true,
+            "classification": true
+          },
+          "cost_sensitivity": [
+            {
+              "cost_bps": 0.0,
+              "sharpe_ratio": 0.1346246581987972,
+              "total_return": 0.07624410106304769,
+              "total_cost": 0.0,
+              "sortino_ratio": 0.14245105142266348
+            },
+            {
+              "cost_bps": 2.0,
+              "sharpe_ratio": 0.08297051370064039,
+              "total_return": 0.04631795919258038,
+              "total_cost": 0.028200000000000003,
+              "sortino_ratio": 0.08760108429698701
+            },
+            {
+              "cost_bps": 5.0,
+              "sharpe_ratio": 0.005456576291413511,
+              "total_return": 0.0029817322816631116,
+              "total_cost": 0.07050000000000001,
+              "sortino_ratio": 0.005764867055448503
+            },
+            {
+              "cost_bps": 10.0,
+              "sharpe_ratio": -0.123736762893126,
+              "total_return": -0.06529350144907829,
+              "total_cost": 0.14100000000000001,
+              "sortino_ratio": -0.13052643596833363
+            },
+            {
+              "cost_bps": 20.0,
+              "sharpe_ratio": -0.3815716409703442,
+              "total_return": -0.1882173964341728,
+              "total_cost": 0.28200000000000003,
+              "sortino_ratio": -0.4035420371544472
+            },
+            {
+              "cost_bps": 50.0,
+              "sharpe_ratio": -1.1397365467465155,
+              "total_return": -0.4682185616721546,
+              "total_cost": 0.7050000000000001,
+              "sortino_ratio": -1.2011190016272248
+            }
+          ],
+          "min_hold_sweep": [
+            {
+              "min_hold": 1,
+              "sharpe_ratio": -0.3490283064783984,
+              "sortino_ratio": -0.34246950124241143,
+              "total_return": -0.17390343251653415,
+              "n_trades": 123,
+              "total_cost": 0.245
+            },
+            {
+              "min_hold": 2,
+              "sharpe_ratio": 0.5138517030978574,
+              "sortino_ratio": 0.5332631508229779,
+              "total_return": 0.32336678235529415,
+              "n_trades": 89,
+              "total_cost": 0.177
+            },
+            {
+              "min_hold": 3,
+              "sharpe_ratio": -0.123736762893126,
+              "sortino_ratio": -0.13052643596833363,
+              "total_return": -0.06529350144907829,
+              "n_trades": 71,
+              "total_cost": 0.14100000000000001
+            },
+            {
+              "min_hold": 5,
+              "sharpe_ratio": 0.612740410695626,
+              "sortino_ratio": 0.6493839484139353,
+              "total_return": 0.3963639628422033,
+              "n_trades": 59,
+              "total_cost": 0.117
+            },
+            {
+              "min_hold": 10,
+              "sharpe_ratio": -1.1946311762281023,
+              "sortino_ratio": -1.164116790002005,
+              "total_return": -0.47754805831664565,
+              "n_trades": 37,
+              "total_cost": 0.07300000000000001
+            }
+          ]
+        },
+        "ensemble_equal": {
+          "aggregate": {
+            "total_return": 0.23701125114389127,
+            "annualized_return": 0.11850562557194563,
+            "sharpe_ratio": 0.3901769508271858,
+            "sortino_ratio": 0.39951843508062335,
+            "max_drawdown": 0.26944978718215545,
+            "calmar_ratio": 0.43980597205605726,
+            "win_rate": 0.8486842105263158,
+            "n_trades": 48,
+            "total_cost": 0.095,
+            "n_periods": 504,
+            "mean_period_return": 0.0004220202160265622,
+            "std_period_return": 0.017170064056539987
+          },
+          "baseline_buy_hold": {
+            "total_return": 0.2102585499083515,
+            "annualized_return": 0.10512927495417575,
+            "sharpe_ratio": 0.34969261683289055,
+            "sortino_ratio": 0.3306139360483088,
+            "max_drawdown": 0.40587291129301883,
+            "calmar_ratio": 0.2590201810198611,
+            "n_periods": 504
+          },
+          "significance_vs_baseline": {
+            "t_stat": 0.054092348246278996,
+            "p_value": 0.9568830655089565,
+            "significant_5pct": false
+          },
+          "component_models": [
+            "lstm",
+            "transformer"
+          ],
+          "ensemble_method": "equal",
+          "ensemble_weights": {
+            "lstm": 0.5,
+            "transformer": 0.5
+          },
+          "cost_sensitivity": [
+            {
+              "cost_bps": 0.0,
+              "sharpe_ratio": 0.564098308369604,
+              "total_return": 0.3602903762109996,
+              "total_cost": 0.0,
+              "sortino_ratio": 0.578017700615681
+            },
+            {
+              "cost_bps": 2.0,
+              "sharpe_ratio": 0.5293799071654461,
+              "total_return": 0.3346888437957353,
+              "total_cost": 0.019000000000000003,
+              "sortino_ratio": 0.5439316210361039
+            },
+            {
+              "cost_bps": 5.0,
+              "sharpe_ratio": 0.4772330878444233,
+              "total_return": 0.2971871492563296,
+              "total_cost": 0.0475,
+              "sortino_ratio": 0.4893412883104064
+            },
+            {
+              "cost_bps": 10.0,
+              "sharpe_ratio": 0.3901769508271858,
+              "total_return": 0.23701125114389127,
+              "total_cost": 0.095,
+              "sortino_ratio": 0.39951843508062335
+            },
+            {
+              "cost_bps": 20.0,
+              "sharpe_ratio": 0.2157922111539524,
+              "total_return": 0.12490455142293874,
+              "total_cost": 0.19,
+              "sortino_ratio": 0.22121686058723852
+            },
+            {
+              "cost_bps": 50.0,
+              "sharpe_ratio": -0.3041621987649409,
+              "total_return": -0.15405574258119917,
+              "total_cost": 0.475,
+              "sortino_ratio": -0.31095850356896076
+            }
+          ]
+        },
+        "ensemble_inverse_variance": {
+          "aggregate": {
+            "total_return": 0.23701125114389127,
+            "annualized_return": 0.11850562557194563,
+            "sharpe_ratio": 0.3901769508271858,
+            "sortino_ratio": 0.39951843508062335,
+            "max_drawdown": 0.26944978718215545,
+            "calmar_ratio": 0.43980597205605726,
+            "win_rate": 0.8486842105263158,
+            "n_trades": 48,
+            "total_cost": 0.095,
+            "n_periods": 504,
+            "mean_period_return": 0.0004220202160265622,
+            "std_period_return": 0.017170064056539987
+          },
+          "baseline_buy_hold": {
+            "total_return": 0.2102585499083515,
+            "annualized_return": 0.10512927495417575,
+            "sharpe_ratio": 0.34969261683289055,
+            "sortino_ratio": 0.3306139360483088,
+            "max_drawdown": 0.40587291129301883,
+            "calmar_ratio": 0.2590201810198611,
+            "n_periods": 504
+          },
+          "significance_vs_baseline": {
+            "t_stat": 0.054092348246278996,
+            "p_value": 0.9568830655089565,
+            "significant_5pct": false
+          },
+          "component_models": [
+            "lstm",
+            "transformer"
+          ],
+          "ensemble_method": "inverse_variance",
+          "ensemble_weights": {
+            "lstm": 0.5005162805279446,
+            "transformer": 0.49948371947205544
+          },
+          "cost_sensitivity": [
+            {
+              "cost_bps": 0.0,
+              "sharpe_ratio": 0.564098308369604,
+              "total_return": 0.3602903762109996,
+              "total_cost": 0.0,
+              "sortino_ratio": 0.578017700615681
+            },
+            {
+              "cost_bps": 2.0,
+              "sharpe_ratio": 0.5293799071654461,
+              "total_return": 0.3346888437957353,
+              "total_cost": 0.019000000000000003,
+              "sortino_ratio": 0.5439316210361039
+            },
+            {
+              "cost_bps": 5.0,
+              "sharpe_ratio": 0.4772330878444233,
+              "total_return": 0.2971871492563296,
+              "total_cost": 0.0475,
+              "sortino_ratio": 0.4893412883104064
+            },
+            {
+              "cost_bps": 10.0,
+              "sharpe_ratio": 0.3901769508271858,
+              "total_return": 0.23701125114389127,
+              "total_cost": 0.095,
+              "sortino_ratio": 0.39951843508062335
+            },
+            {
+              "cost_bps": 20.0,
+              "sharpe_ratio": 0.2157922111539524,
+              "total_return": 0.12490455142293874,
+              "total_cost": 0.19,
+              "sortino_ratio": 0.22121686058723852
+            },
+            {
+              "cost_bps": 50.0,
+              "sharpe_ratio": -0.3041621987649409,
+              "total_return": -0.15405574258119917,
+              "total_cost": 0.475,
+              "sortino_ratio": -0.31095850356896076
+            }
+          ]
+        }
+      }
+    }
+  }
+}

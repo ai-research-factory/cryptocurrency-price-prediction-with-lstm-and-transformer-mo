@@ -1,4 +1,7 @@
-"""LSTM and Transformer models for price prediction."""
+"""LSTM and Transformer models for price prediction.
+
+Cycle 5: Added classification mode (direction prediction with sigmoid output).
+"""
 
 import math
 
@@ -15,8 +18,10 @@ class LSTMPredictor(nn.Module):
         hidden_size: int = 64,
         num_layers: int = 2,
         dropout: float = 0.2,
+        classification: bool = False,
     ):
         super().__init__()
+        self.classification = classification
         self.lstm = nn.LSTM(
             input_size=input_size,
             hidden_size=hidden_size,
@@ -32,7 +37,10 @@ class LSTMPredictor(nn.Module):
         lstm_out, _ = self.lstm(x)
         last_hidden = lstm_out[:, -1, :]  # take last timestep
         out = self.dropout(last_hidden)
-        return self.fc(out).squeeze(-1)
+        logits = self.fc(out).squeeze(-1)
+        if self.classification:
+            return torch.sigmoid(logits)
+        return logits
 
 
 class PositionalEncoding(nn.Module):
@@ -64,8 +72,10 @@ class TransformerPredictor(nn.Module):
         num_layers: int = 2,
         dim_feedforward: int = 128,
         dropout: float = 0.2,
+        classification: bool = False,
     ):
         super().__init__()
+        self.classification = classification
         self.input_proj = nn.Linear(input_size, d_model)
         self.pos_enc = PositionalEncoding(d_model)
         encoder_layer = nn.TransformerEncoderLayer(
@@ -86,14 +96,19 @@ class TransformerPredictor(nn.Module):
         x = self.transformer(x)
         last = x[:, -1, :]  # take last timestep
         out = self.dropout(last)
-        return self.fc(out).squeeze(-1)
+        logits = self.fc(out).squeeze(-1)
+        if self.classification:
+            return torch.sigmoid(logits)
+        return logits
 
 
 def build_model(model_type: str, input_size: int, **kwargs) -> nn.Module:
     """Factory function to build a model."""
     if model_type == "lstm":
-        return LSTMPredictor(input_size, **kwargs)
+        valid = {"hidden_size", "num_layers", "dropout", "classification"}
+        return LSTMPredictor(input_size, **{k: v for k, v in kwargs.items() if k in valid})
     elif model_type == "transformer":
-        return TransformerPredictor(input_size, **kwargs)
+        valid = {"d_model", "nhead", "num_layers", "dim_feedforward", "dropout", "classification"}
+        return TransformerPredictor(input_size, **{k: v for k, v in kwargs.items() if k in valid})
     else:
         raise ValueError(f"Unknown model type: {model_type}")

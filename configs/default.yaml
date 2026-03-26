@@ -43,7 +43,15 @@ evaluation:
   cost_sensitivity_bps: [0.0, 2.0, 5.0, 10.0, 20.0, 50.0]
   # Cycle 4: minimum holding period to reduce trade churn (periods)
   min_holding_period: 3
-  # Cycle 4: feature importance analysis (permutation-based)
-  feature_importance: true
-  # Cycle 4: ensemble averaging of LSTM + Transformer predictions
+  # Cycle 4: feature importance analysis (disabled in Cycle 5 to save compute)
+  feature_importance: false
+  # Cycle 4/5: ensemble averaging of LSTM + Transformer predictions
   ensemble: true
+  # Cycle 5: direction classification mode (BCE loss, sigmoid output)
+  classification: true
+  # Cycle 5: allow short positions (long/short/flat strategy)
+  allow_short: true
+  # Cycle 5: ensemble method - "equal" or "inverse_variance"
+  ensemble_method: "inverse_variance"
+  # Cycle 5: min holding period sweep
+  min_hold_sweep: [1, 2, 3, 5, 10]

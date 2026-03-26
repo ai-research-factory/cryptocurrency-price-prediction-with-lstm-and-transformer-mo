@@ -1,6 +1,7 @@
 """Training and dataset utilities.
 
 Cycle 4: Added learning rate scheduling (ReduceLROnPlateau).
+Cycle 5: Added classification mode (BCE loss for direction prediction).
 """
 
 import logging
@@ -15,10 +16,12 @@ logger = logging.getLogger(__name__)
 class TimeSeriesDataset(Dataset):
     """Sliding-window dataset for time-series prediction."""
 
-    def __init__(self, features: np.ndarray, targets: np.ndarray, seq_len: int):
+    def __init__(self, features: np.ndarray, targets: np.ndarray, seq_len: int,
+                 classification: bool = False):
         self.seq_len = seq_len
         self.features = features
         self.targets = targets
+        self.classification = classification
         self.n_samples = len(features) - seq_len
 
     def __len__(self):
@@ -27,6 +30,8 @@ class TimeSeriesDataset(Dataset):
     def __getitem__(self, idx):
         x = self.features[idx : idx + self.seq_len]
         y = self.targets[idx + self.seq_len]
+        if self.classification:
+            y = 1.0 if y > 0 else 0.0
         return torch.tensor(x, dtype=torch.float32), torch.tensor(y, dtype=torch.float32)
 
 
@@ -36,6 +41,7 @@ def prepare_data(
     train_end: int,
     seq_len: int,
     scaler_stats: dict | None = None,
+    classification: bool = False,
 ) -> tuple:
     """Split and scale data using train-only statistics.
 
@@ -58,8 +64,8 @@ def prepare_data(
     train_scaled = (train_features - scaler_stats["mean"]) / scaler_stats["std"]
     test_scaled = (test_features - scaler_stats["mean"]) / scaler_stats["std"]
 
-    train_ds = TimeSeriesDataset(train_scaled, train_targets, seq_len)
-    test_ds = TimeSeriesDataset(test_scaled, test_targets, seq_len)
+    train_ds = TimeSeriesDataset(train_scaled, train_targets, seq_len, classification=classification)
+    test_ds = TimeSeriesDataset(test_scaled, test_targets, seq_len, classification=classification)
 
     return train_ds, test_ds, scaler_stats, train_end + seq_len
 
@@ -72,15 +78,17 @@ def train_model(
     lr: float = 1e-3,
     device: str = "cpu",
     use_lr_scheduler: bool = True,
+    classification: bool = False,
 ) -> list[float]:
     """Train model and return loss history.
 
     Cycle 4: Added ReduceLROnPlateau scheduler for better convergence.
+    Cycle 5: Added classification mode with BCE loss.
     """
     model = model.to(device)
     model.train()
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
-    criterion = torch.nn.MSELoss()
+    criterion = torch.nn.BCELoss() if classification else torch.nn.MSELoss()
     loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True)
 
     scheduler = None

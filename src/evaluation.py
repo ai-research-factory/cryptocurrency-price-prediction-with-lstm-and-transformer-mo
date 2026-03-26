@@ -5,6 +5,9 @@ Sortino/Calmar ratios, cost sensitivity analysis, and significance testing.
 
 Cycle 4: Added minimum holding period, feature importance analysis,
 and ensemble prediction support.
+
+Cycle 5: Added long/short strategy, classification mode, min holding period
+sweep, and inverse-variance ensemble weighting.
 """
 
 import logging
@@ -60,17 +63,30 @@ def compute_trading_metrics(
     cost_bps: float = 10.0,
     interval: str = "1d",
     min_holding_period: int = 1,
+    allow_short: bool = False,
+    classification: bool = False,
 ) -> dict:
     """Compute trading metrics from predicted vs actual returns.
 
-    Strategy: go long when predicted return > 0, else flat.
-    Cycle 4: Added min_holding_period to reduce trade frequency.
+    Strategy: go long when predicted return > 0, else flat (or short if allow_short).
+    For classification mode, predictions are probabilities: >0.5 = long, <0.5 = short/flat.
+    Cycle 5: Added long/short strategy and classification mode support.
     """
     ann_factor = get_annualization_factor(interval)
     cost = cost_bps / 10_000
 
-    # Position: 1 if predicted return > 0, else 0
-    position = (predictions > 0).astype(float)
+    if classification:
+        # Predictions are probabilities [0, 1]; threshold at 0.5
+        if allow_short:
+            position = np.where(predictions > 0.5, 1.0, -1.0)
+        else:
+            position = (predictions > 0.5).astype(float)
+    else:
+        # Predictions are return forecasts
+        if allow_short:
+            position = np.sign(predictions)  # +1, 0, or -1
+        else:
+            position = (predictions > 0).astype(float)
     position = _apply_min_holding_period(position, min_holding_period)
     trades = np.abs(np.diff(position, prepend=0))
 
@@ -193,12 +209,15 @@ def cost_sensitivity_analysis(
     cost_levels_bps: list[float],
     interval: str = "1d",
     min_holding_period: int = 1,
+    allow_short: bool = False,
+    classification: bool = False,
 ) -> list[dict]:
     """Evaluate strategy at multiple transaction cost levels."""
     results = []
     for cost_bps in cost_levels_bps:
         metrics = compute_trading_metrics(
-            predictions, actual_returns, cost_bps, interval, min_holding_period
+            predictions, actual_returns, cost_bps, interval, min_holding_period,
+            allow_short=allow_short, classification=classification,
         )
         results.append({
             "cost_bps": cost_bps,
@@ -206,6 +225,36 @@ def cost_sensitivity_analysis(
             "total_return": metrics["total_return"],
             "total_cost": metrics["total_cost"],
             "sortino_ratio": metrics["sortino_ratio"],
+        })
+    return results
+
+
+def min_holding_period_sweep(
+    predictions: np.ndarray,
+    actual_returns: np.ndarray,
+    hold_levels: list[int],
+    cost_bps: float = 10.0,
+    interval: str = "1d",
+    allow_short: bool = False,
+    classification: bool = False,
+) -> list[dict]:
+    """Sweep minimum holding periods to find optimal trade frequency.
+
+    Cycle 5: Evaluates strategy at different min_hold values.
+    """
+    results = []
+    for hold in hold_levels:
+        metrics = compute_trading_metrics(
+            predictions, actual_returns, cost_bps, interval, hold,
+            allow_short=allow_short, classification=classification,
+        )
+        results.append({
+            "min_hold": hold,
+            "sharpe_ratio": metrics["sharpe_ratio"],
+            "sortino_ratio": metrics["sortino_ratio"],
+            "total_return": metrics["total_return"],
+            "n_trades": metrics["n_trades"],
+            "total_cost": metrics["total_cost"],
         })
     return results
 
@@ -349,11 +398,16 @@ def walk_forward_validation(
     adaptive_window: bool = False,
     cost_sensitivity_levels: Optional[list[float]] = None,
     min_holding_period: int = 1,
+    allow_short: bool = False,
+    classification: bool = False,
+    min_hold_sweep_levels: Optional[list[int]] = None,
 ) -> dict:
     """Run purged walk-forward validation.
 
     Slides a window with an optional purge gap between train and test
     to prevent information leakage from overlapping sequences.
+
+    Cycle 5: Added allow_short, classification, and min_hold_sweep_levels.
     """
     n = len(features)
 
@@ -386,12 +440,12 @@ def walk_forward_validation(
         test_targets = targets[test_start:test_end]
 
         # Combine for prepare_data, which expects contiguous array
-        # We pass train data and test data separately via the train_end split
         window_features = np.vstack([train_features, test_features])
         window_targets = np.concatenate([train_targets, test_targets])
 
         train_ds, test_ds, _, pred_offset = prepare_data(
-            window_features, window_targets, train_size, seq_len
+            window_features, window_targets, train_size, seq_len,
+            classification=classification,
         )
 
         if len(test_ds) == 0:
@@ -399,13 +453,19 @@ def walk_forward_validation(
             continue
 
         model = build_model(model_type, features.shape[1], **model_kwargs)
-        train_model(model, train_ds, epochs=epochs, batch_size=batch_size, lr=lr, device=device)
+        train_model(
+            model, train_ds, epochs=epochs, batch_size=batch_size, lr=lr,
+            device=device, classification=classification,
+        )
 
         preds = predict(model, test_ds, device=device)
         actuals = window_targets[train_size + seq_len : train_size + seq_len + len(preds)]
 
         # Window-level metrics
-        w_metrics = compute_trading_metrics(preds, actuals, cost_bps, interval, min_holding_period)
+        w_metrics = compute_trading_metrics(
+            preds, actuals, cost_bps, interval, min_holding_period,
+            allow_short=allow_short, classification=classification,
+        )
         w_metrics["window"] = window_idx
         window_metrics.append(w_metrics)
 
@@ -428,11 +488,23 @@ def walk_forward_validation(
     all_actuals = np.array(all_actuals)
 
     # Aggregate metrics
-    agg_metrics = compute_trading_metrics(all_preds, all_actuals, cost_bps, interval, min_holding_period)
+    agg_metrics = compute_trading_metrics(
+        all_preds, all_actuals, cost_bps, interval, min_holding_period,
+        allow_short=allow_short, classification=classification,
+    )
     baseline_metrics = compute_naive_baseline(all_actuals, cost_bps, interval)
 
     # Strategy vs baseline significance test
-    position = (all_preds > 0).astype(float)
+    if classification:
+        if allow_short:
+            position = np.where(all_preds > 0.5, 1.0, -1.0)
+        else:
+            position = (all_preds > 0.5).astype(float)
+    else:
+        if allow_short:
+            position = np.sign(all_preds)
+        else:
+            position = (all_preds > 0).astype(float)
     position = _apply_min_holding_period(position, min_holding_period)
     cost = cost_bps / 10_000
     trades = np.abs(np.diff(position, prepend=0))
@@ -456,7 +528,16 @@ def walk_forward_validation(
     cost_sensitivity = None
     if cost_sensitivity_levels:
         cost_sensitivity = cost_sensitivity_analysis(
-            all_preds, all_actuals, cost_sensitivity_levels, interval, min_holding_period
+            all_preds, all_actuals, cost_sensitivity_levels, interval,
+            min_holding_period, allow_short=allow_short, classification=classification,
+        )
+
+    # Cycle 5: Min holding period sweep
+    hold_sweep = None
+    if min_hold_sweep_levels:
+        hold_sweep = min_holding_period_sweep(
+            all_preds, all_actuals, min_hold_sweep_levels, cost_bps, interval,
+            allow_short=allow_short, classification=classification,
         )
 
     result = {
@@ -480,9 +561,13 @@ def walk_forward_validation(
             "interval": interval,
             "annualization_factor": get_annualization_factor(interval),
             "min_holding_period": min_holding_period,
+            "allow_short": allow_short,
+            "classification": classification,
         },
     }
     if cost_sensitivity is not None:
         result["cost_sensitivity"] = cost_sensitivity
+    if hold_sweep is not None:
+        result["min_hold_sweep"] = hold_sweep
 
     return result
