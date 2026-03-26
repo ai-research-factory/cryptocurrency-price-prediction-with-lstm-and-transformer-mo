@@ -1,0 +1,53 @@
+{
+  "ticker": "AAPL",
+  "n_samples": 1222,
+  "n_features": 12,
+  "models": {
+    "lstm": {
+      "aggregate": {
+        "total_return": -0.40875047769985134,
+        "annualized_return": -0.312136728425341,
+        "sharpe_ratio": -2.0212683885790104,
+        "max_drawdown": 0.581885822557859,
+        "win_rate": 0.47282608695652173,
+        "n_trades": 34,
+        "n_days": 330,
+        "mean_daily_return": -0.0015924762034100891,
+        "std_daily_return": 0.012506887339113133
+      },
+      "baseline_buy_hold": {
+        "total_return": -0.16878668973960811,
+        "annualized_return": -0.12889165398297348,
+        "sharpe_ratio": -0.5528197548516729,
+        "max_drawdown": 0.48342509749660634,
+        "n_days": 330
+      },
+      "stability_ratio": 0.18181818181818182,
+      "n_windows": 11,
+      "positive_windows": 2
+    },
+    "transformer": {
+      "aggregate": {
+        "total_return": -0.03676579448872103,
+        "annualized_return": -0.02807569760956879,
+        "sharpe_ratio": -0.24696704232093813,
+        "max_drawdown": 0.12656890270791357,
+        "win_rate": 0.504,
+        "n_trades": 35,
+        "n_days": 330,
+        "mean_daily_return": -0.00011351118997505624,
+        "std_daily_return": 0.007296254031501074
+      },
+      "baseline_buy_hold": {
+        "total_return": -0.16878668973960811,
+        "annualized_return": -0.12889165398297348,
+        "sharpe_ratio": -0.5528197548516729,
+        "max_drawdown": 0.48342509749660634,
+        "n_days": 330
+      },
+      "stability_ratio": 0.2727272727272727,
+      "n_windows": 11,
+      "positive_windows": 3
+    }
+  }
+}
