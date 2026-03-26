@@ -5,6 +5,8 @@ Cycle 5: Added classification mode, long/short strategy, min hold sweep,
 inverse-variance ensemble weighting.
 Cycle 6: Added GRU model, sequence length sweep, adaptive per-ticker hold period,
 frequency-adaptive indicator periods, 3-model ensemble.
+Cycle 7: Added per-model-ticker adaptive seq_len, Transformer warm-up scheduling,
+additional tickers (SPY, MSFT), volatility-regime short toggling.
 """
 
 import argparse
@@ -26,6 +28,7 @@ from .evaluation import (
     compute_significance_vs_baseline, cost_sensitivity_analysis,
     _apply_min_holding_period, min_holding_period_sweep,
     seq_len_sensitivity_sweep, select_optimal_hold_period,
+    select_optimal_seq_len, compute_trading_metrics_regime_short,
 )
 
 logging.basicConfig(
@@ -105,13 +108,17 @@ def _build_ensemble_result(
     if len(model_all_preds) < 2:
         return None
 
-    # All models should have same length predictions
+    # Align predictions to common length (may differ with adaptive seq_len)
     lengths = [len(p) for p in model_all_preds.values()]
+    min_len = min(lengths)
     if len(set(lengths)) != 1:
-        logger.warning("Model prediction lengths differ, cannot ensemble")
-        return None
+        logger.info(f"Prediction lengths differ ({dict(zip(model_all_preds.keys(), lengths))}), "
+                     f"truncating to common length {min_len}")
+        model_all_preds = {m: p[-min_len:] for m, p in model_all_preds.items()}
 
-    all_actuals = np.array(model_results[list(model_all_preds.keys())[0]]["all_actuals"])
+    first_model = list(model_all_preds.keys())[0]
+    all_actuals_raw = np.array(model_results[first_model]["all_actuals"])
+    all_actuals = all_actuals_raw[-min_len:]
     cost_bps = eval_cfg.get("cost_bps", 10.0)
 
     # Compute weights
@@ -182,7 +189,7 @@ def _build_ensemble_result(
 
 
 def run_experiment(config: dict) -> dict:
-    """Run full experiment pipeline with Cycle 6 enhancements."""
+    """Run full experiment pipeline with Cycle 7 enhancements."""
     data_cfg = config["data"]
     model_cfg = config["model"]
     train_cfg = config["training"]
@@ -208,6 +215,12 @@ def run_experiment(config: dict) -> dict:
     # Cycle 6: new options
     seq_len_sweep_levels = eval_cfg.get("seq_len_sweep", None)
     adaptive_hold = eval_cfg.get("adaptive_hold", False)
+    # Cycle 7: new options
+    adaptive_seq_len = eval_cfg.get("adaptive_seq_len", False)
+    warmup_epochs = eval_cfg.get("warmup_epochs", 0)
+    regime_short = eval_cfg.get("regime_short", False)
+    vol_lookback = eval_cfg.get("vol_lookback", 60)
+    high_vol_threshold = eval_cfg.get("high_vol_threshold", 1.5)
 
     all_ticker_results = {}
 
@@ -280,6 +293,43 @@ def run_experiment(config: dict) -> dict:
             else:
                 logger.info(f"Adaptive hold: sweep failed, using default min_hold={ticker_hold}")
 
+        # Cycle 7: Per-model-ticker adaptive seq_len selection
+        # Phase 1: If adaptive_seq_len, run seq_len sweep first to find optimal per model
+        model_seq_lens = {}
+        if adaptive_seq_len and seq_len_sweep_levels:
+            for mtype in model_cfg["types"]:
+                logger.info(f"\n{'='*60}")
+                logger.info(f"Adaptive seq_len: sweeping for {mtype.upper()} on {ticker}")
+                logger.info(f"{'='*60}")
+                mkwargs = model_cfg.get(mtype, {})
+                # Determine warmup for this model type
+                mtype_warmup = warmup_epochs if mtype == "transformer" else 0
+                sl_sweep = seq_len_sensitivity_sweep(
+                    features=features,
+                    targets=targets,
+                    model_type=mtype,
+                    model_kwargs=mkwargs,
+                    seq_len_levels=seq_len_sweep_levels,
+                    train_size=eval_cfg.get("train_size", 500),
+                    test_size=eval_cfg.get("test_size", 60),
+                    step_size=eval_cfg.get("step_size", 60),
+                    epochs=train_cfg.get("epochs", 50),
+                    batch_size=train_cfg.get("batch_size", 32),
+                    lr=train_cfg.get("lr", 1e-3),
+                    cost_bps=eval_cfg.get("cost_bps", 10.0),
+                    purge_gap=purge_gap,
+                    interval=interval,
+                    adaptive_window=adaptive_window,
+                    min_holding_period=ticker_hold,
+                    allow_short=allow_short,
+                    warmup_epochs=mtype_warmup,
+                )
+                optimal_sl = select_optimal_seq_len(sl_sweep, train_cfg.get("seq_len", 30))
+                model_seq_lens[mtype] = optimal_sl
+                logger.info(f"Adaptive seq_len: selected seq_len={optimal_sl} for {mtype.upper()} on {ticker}")
+                # Store sweep results for reporting
+                model_seq_lens[f"{mtype}_sweep"] = sl_sweep
+
         # Run regression mode for all model types
         for mtype in model_cfg["types"]:
             logger.info(f"\n{'='*60}")
@@ -287,13 +337,20 @@ def run_experiment(config: dict) -> dict:
             logger.info(f"{'='*60}")
 
             mkwargs = model_cfg.get(mtype, {})
+            # Cycle 7: Use per-model optimal seq_len if adaptive
+            mtype_seq_len = model_seq_lens.get(mtype, train_cfg.get("seq_len", 30))
+            # Cycle 7: Transformer gets warm-up epochs
+            mtype_warmup = warmup_epochs if mtype == "transformer" else 0
+
+            if mtype in model_seq_lens:
+                logger.info(f"  Using adaptive seq_len={mtype_seq_len} for {mtype.upper()}")
 
             result = walk_forward_validation(
                 features=features,
                 targets=targets,
                 model_type=mtype,
                 model_kwargs=mkwargs,
-                seq_len=train_cfg.get("seq_len", 30),
+                seq_len=mtype_seq_len,
                 train_size=eval_cfg.get("train_size", 500),
                 test_size=eval_cfg.get("test_size", 60),
                 step_size=eval_cfg.get("step_size", 60),
@@ -309,11 +366,15 @@ def run_experiment(config: dict) -> dict:
                 allow_short=allow_short,
                 classification=False,
                 min_hold_sweep_levels=min_hold_sweep_levels,
+                warmup_epochs=mtype_warmup,
             )
             model_results[mtype] = result
 
-            # Cycle 6: Sequence length sensitivity sweep
-            if seq_len_sweep_levels:
+            # Store seq_len sweep results (from adaptive phase or run fresh)
+            if f"{mtype}_sweep" in model_seq_lens:
+                result["seq_len_sweep"] = model_seq_lens[f"{mtype}_sweep"]
+                result["adaptive_seq_len"] = mtype_seq_len
+            elif seq_len_sweep_levels and not adaptive_seq_len:
                 logger.info(f"  Running seq_len sweep for {mtype.upper()} on {ticker}")
                 sl_sweep = seq_len_sensitivity_sweep(
                     features=features,
@@ -333,8 +394,23 @@ def run_experiment(config: dict) -> dict:
                     adaptive_window=adaptive_window,
                     min_holding_period=ticker_hold,
                     allow_short=allow_short,
+                    warmup_epochs=mtype_warmup,
                 )
                 result["seq_len_sweep"] = sl_sweep
+
+            # Cycle 7: Regime-based short toggling comparison
+            if regime_short and "all_predictions" in result and "all_actuals" in result:
+                regime_metrics = compute_trading_metrics_regime_short(
+                    np.array(result["all_predictions"]),
+                    np.array(result["all_actuals"]),
+                    cost_bps=eval_cfg.get("cost_bps", 10.0),
+                    interval=interval,
+                    min_holding_period=ticker_hold,
+                    classification=False,
+                    vol_lookback=vol_lookback,
+                    high_vol_threshold=high_vol_threshold,
+                )
+                result["regime_short"] = regime_metrics
 
         # Cycle 5: Run classification mode for comparison
         if classification:
@@ -345,13 +421,15 @@ def run_experiment(config: dict) -> dict:
 
                 mkwargs = dict(model_cfg.get(mtype, {}))
                 mkwargs["classification"] = True
+                mtype_seq_len = model_seq_lens.get(mtype, train_cfg.get("seq_len", 30))
+                mtype_warmup = warmup_epochs if mtype == "transformer" else 0
 
                 result = walk_forward_validation(
                     features=features,
                     targets=targets,
                     model_type=mtype,
                     model_kwargs=mkwargs,
-                    seq_len=train_cfg.get("seq_len", 30),
+                    seq_len=mtype_seq_len,
                     train_size=eval_cfg.get("train_size", 500),
                     test_size=eval_cfg.get("test_size", 60),
                     step_size=eval_cfg.get("step_size", 60),
@@ -367,6 +445,7 @@ def run_experiment(config: dict) -> dict:
                     allow_short=allow_short,
                     classification=True,
                     min_hold_sweep_levels=min_hold_sweep_levels,
+                    warmup_epochs=mtype_warmup,
                 )
                 model_results[f"{mtype}_cls"] = result
 
@@ -417,6 +496,10 @@ def run_experiment(config: dict) -> dict:
                 if "ranking" in fi:
                     logger.info(f"Feature ranking ({mtype}): {fi['ranking']}")
 
+        # Cycle 7: Collect per-model adaptive seq_len selections
+        adaptive_seq_lens = {m: sl for m, sl in model_seq_lens.items()
+                             if not m.endswith("_sweep")} if model_seq_lens else None
+
         all_ticker_results[ticker] = {
             "n_samples": len(combined),
             "n_features": len(feature_cols),
@@ -425,6 +508,7 @@ def run_experiment(config: dict) -> dict:
             "feature_stats": feature_stats,
             "interval": interval,
             "adaptive_hold_period": ticker_hold if adaptive_hold else None,
+            "adaptive_seq_lens": adaptive_seq_lens,
             "results": model_results,
             "feature_importance": feat_importance if feat_importance else None,
         }
@@ -436,7 +520,7 @@ def run_experiment(config: dict) -> dict:
     }
 
 
-def save_results(experiment: dict, output_dir: str = "reports/cycle_6"):
+def save_results(experiment: dict, output_dir: str = "reports/cycle_7"):
     """Save experiment results for all tickers."""
     out = Path(output_dir)
     out.mkdir(parents=True, exist_ok=True)
@@ -481,6 +565,10 @@ def save_results(experiment: dict, output_dir: str = "reports/cycle_6"):
                 model_metrics["min_hold_sweep"] = result["min_hold_sweep"]
             if "seq_len_sweep" in result:
                 model_metrics["seq_len_sweep"] = result["seq_len_sweep"]
+            if "adaptive_seq_len" in result:
+                model_metrics["adaptive_seq_len"] = result["adaptive_seq_len"]
+            if "regime_short" in result:
+                model_metrics["regime_short"] = result["regime_short"]
             ticker_metrics["models"][model_name] = model_metrics
 
         # Cycle 4: Feature importance
@@ -490,6 +578,10 @@ def save_results(experiment: dict, output_dir: str = "reports/cycle_6"):
         # Cycle 6: Adaptive hold period
         if ticker_data.get("adaptive_hold_period") is not None:
             ticker_metrics["adaptive_hold_period"] = ticker_data["adaptive_hold_period"]
+
+        # Cycle 7: Adaptive seq_len per model
+        if ticker_data.get("adaptive_seq_lens"):
+            ticker_metrics["adaptive_seq_lens"] = ticker_data["adaptive_seq_lens"]
 
         metrics["per_ticker"][ticker] = ticker_metrics
 
@@ -508,21 +600,25 @@ def main():
     config = load_config(args.config)
     experiment = run_experiment(config)
 
-    output_dir = args.output_dir or "reports/cycle_6"
+    output_dir = args.output_dir or "reports/cycle_7"
     save_results(experiment, output_dir=output_dir)
 
     # Print summary
     print("\n" + "=" * 70)
-    print("EXPERIMENT SUMMARY (Cycle 6)")
+    print("EXPERIMENT SUMMARY (Cycle 7)")
     print("=" * 70)
     for ticker, ticker_data in experiment["ticker_results"].items():
         print(f"\n{'─'*70}")
         adaptive_hold_str = ""
         if ticker_data.get("adaptive_hold_period") is not None:
             adaptive_hold_str = f", adaptive_hold={ticker_data['adaptive_hold_period']}"
+        adaptive_sl_str = ""
+        if ticker_data.get("adaptive_seq_lens"):
+            sl_parts = [f"{m}={sl}" for m, sl in ticker_data["adaptive_seq_lens"].items()]
+            adaptive_sl_str = f", adaptive_seq_len=[{', '.join(sl_parts)}]"
         print(f"Ticker: {ticker} ({ticker_data['n_samples']} samples, "
               f"{ticker_data['n_features']} features, interval={ticker_data.get('interval', '1d')}"
-              f"{adaptive_hold_str})")
+              f"{adaptive_hold_str}{adaptive_sl_str})")
         print(f"{'─'*70}")
         for model_name, result in ticker_data["results"].items():
             if "error" in result:
@@ -570,6 +666,14 @@ def main():
                     else:
                         print(f"      seq_len={sl['seq_len']:3d} → Sharpe={sl['sharpe_ratio']:.4f}, "
                               f"trades={sl['n_trades']}")
+            if "adaptive_seq_len" in result:
+                print(f"    Adaptive seq_len: {result['adaptive_seq_len']}")
+            if "regime_short" in result:
+                rs = result["regime_short"]
+                print(f"    Regime short:     Sharpe={rs['sharpe_ratio']:.4f}, "
+                      f"Return={rs['total_return']:.4f}, "
+                      f"high_vol_periods={rs['high_vol_periods']}, "
+                      f"shorts_disabled={rs['shorts_disabled']}")
             if "cost_sensitivity" in result:
                 print(f"    Cost sensitivity:")
                 for cs in result["cost_sensitivity"]:

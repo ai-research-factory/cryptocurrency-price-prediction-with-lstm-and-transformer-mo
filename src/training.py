@@ -2,6 +2,7 @@
 
 Cycle 4: Added learning rate scheduling (ReduceLROnPlateau).
 Cycle 5: Added classification mode (BCE loss for direction prediction).
+Cycle 7: Added linear warm-up LR scheduling for Transformer convergence.
 """
 
 import logging
@@ -79,11 +80,14 @@ def train_model(
     device: str = "cpu",
     use_lr_scheduler: bool = True,
     classification: bool = False,
+    warmup_epochs: int = 0,
 ) -> list[float]:
     """Train model and return loss history.
 
     Cycle 4: Added ReduceLROnPlateau scheduler for better convergence.
     Cycle 5: Added classification mode with BCE loss.
+    Cycle 7: Added linear warm-up for Transformer convergence.
+    warmup_epochs: number of epochs for linear LR warm-up from lr/10 to lr.
     """
     model = model.to(device)
     model.train()
@@ -92,6 +96,14 @@ def train_model(
     loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True)
 
     scheduler = None
+    warmup_scheduler = None
+
+    if warmup_epochs > 0:
+        # Linear warm-up: start at lr/10, ramp to lr over warmup_epochs
+        warmup_scheduler = torch.optim.lr_scheduler.LinearLR(
+            optimizer, start_factor=0.1, end_factor=1.0, total_iters=warmup_epochs,
+        )
+
     if use_lr_scheduler:
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
             optimizer, mode="min", factor=0.5, patience=5, min_lr=1e-6,
@@ -115,7 +127,10 @@ def train_model(
         avg_loss = epoch_loss / max(n_batches, 1)
         losses.append(avg_loss)
 
-        if scheduler is not None:
+        # Warm-up takes priority during warmup_epochs, then ReduceLROnPlateau
+        if warmup_scheduler is not None and epoch < warmup_epochs:
+            warmup_scheduler.step()
+        elif scheduler is not None:
             scheduler.step(avg_loss)
 
         if (epoch + 1) % 10 == 0:

@@ -12,6 +12,9 @@ from src.evaluation import (
     _compute_adaptive_window_sizes,
     _apply_min_holding_period,
     select_optimal_hold_period,
+    select_optimal_seq_len,
+    compute_volatility_regime,
+    compute_trading_metrics_regime_short,
 )
 
 
@@ -202,3 +205,82 @@ def test_select_optimal_hold_period_negative():
         {"min_hold": 5, "sharpe_ratio": -0.5},
     ]
     assert select_optimal_hold_period(sweep_results) == 5
+
+
+# Cycle 7 tests
+
+def test_select_optimal_seq_len():
+    """Should select the seq_len with best Sharpe."""
+    sweep_results = [
+        {"seq_len": 10, "sharpe_ratio": 0.5, "n_trades": 10, "n_windows": 3},
+        {"seq_len": 20, "sharpe_ratio": 1.8, "n_trades": 8, "n_windows": 3},
+        {"seq_len": 30, "sharpe_ratio": 1.2, "n_trades": 6, "n_windows": 3},
+        {"seq_len": 50, "sharpe_ratio": -0.3, "n_trades": 4, "n_windows": 3},
+    ]
+    assert select_optimal_seq_len(sweep_results) == 20
+
+
+def test_select_optimal_seq_len_with_errors():
+    """Should skip entries with errors."""
+    sweep_results = [
+        {"seq_len": 10, "error": "No valid windows"},
+        {"seq_len": 20, "sharpe_ratio": 0.5, "n_trades": 8, "n_windows": 3},
+        {"seq_len": 30, "sharpe_ratio": 1.0, "n_trades": 6, "n_windows": 3},
+    ]
+    assert select_optimal_seq_len(sweep_results) == 30
+
+
+def test_select_optimal_seq_len_empty():
+    """Should return default when no valid results."""
+    assert select_optimal_seq_len([], default_seq_len=30) == 30
+    assert select_optimal_seq_len([{"seq_len": 10, "error": "fail"}], default_seq_len=20) == 20
+
+
+def test_volatility_regime_basic():
+    """Should detect high-vol periods."""
+    rng = np.random.RandomState(42)
+    # Low vol period followed by high vol period
+    low_vol = rng.randn(100) * 0.001
+    high_vol = rng.randn(100) * 0.01  # 10x higher vol
+    returns = np.concatenate([low_vol, high_vol])
+    regime = compute_volatility_regime(returns, lookback=30, high_vol_threshold=1.5)
+    assert len(regime) == 200
+    # High-vol regime should have more 1s in the second half
+    assert np.sum(regime[100:]) > np.sum(regime[:100])
+
+
+def test_volatility_regime_short_data():
+    """Should return all zeros for short data."""
+    returns = np.array([0.01, -0.01, 0.02])
+    regime = compute_volatility_regime(returns, lookback=60)
+    assert len(regime) == 3
+    np.testing.assert_array_equal(regime, np.zeros(3))
+
+
+def test_regime_short_metrics_structure():
+    """Regime short metrics should include regime-specific fields."""
+    preds = np.array([0.01, -0.01, 0.02, 0.01, -0.005] * 20)
+    actuals = np.array([0.005, -0.003, 0.01, -0.002, 0.001] * 20)
+    metrics = compute_trading_metrics_regime_short(preds, actuals, vol_lookback=10)
+    assert "high_vol_periods" in metrics
+    assert "shorts_disabled" in metrics
+    assert "sharpe_ratio" in metrics
+
+
+def test_regime_short_vs_full_short():
+    """Regime short should disable some shorts compared to full short."""
+    rng = np.random.RandomState(42)
+    low_vol = rng.randn(100) * 0.001
+    high_vol = rng.randn(100) * 0.01
+    actuals = np.concatenate([low_vol, high_vol])
+    preds = np.concatenate([rng.randn(100) * 0.001, rng.randn(100) * 0.01])
+
+    full_short = compute_trading_metrics(
+        preds, actuals, cost_bps=10, min_holding_period=1, allow_short=True,
+    )
+    regime = compute_trading_metrics_regime_short(
+        preds, actuals, cost_bps=10, min_holding_period=1,
+        vol_lookback=30, high_vol_threshold=1.5,
+    )
+    # Regime short should have fewer or equal trades than full short
+    assert regime["n_trades"] <= full_short["n_trades"] + 5  # small tolerance

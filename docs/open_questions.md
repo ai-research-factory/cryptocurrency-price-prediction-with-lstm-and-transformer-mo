@@ -34,18 +34,25 @@
 - ~~**Ensemble model diversity (#7 from Cycle 5):** Added GRU as third model type. 3-model ensemble achieves differentiated inverse-variance weights. BTC ensemble improved from 3.85 to 4.85 Sharpe.~~
 - ~~**Per-ticker holding period optimization (#4 from Cycle 5):** Adaptive per-ticker hold period selection implemented. BTC=1, ETH=10, AAPL=5 selected automatically from sweep results.~~
 
+## Addressed in Cycle 7
+
+- ~~**Per-model-ticker seq_len optimization (#1):** Implemented adaptive seq_len selection per model per ticker. Transformer consistently prefers 20-30 across equities; LSTM/GRU selections vary widely (10-50). Eliminates one-size-fits-all seq_len.~~
+- ~~**Transformer convergence (#3):** Added 5-epoch linear warm-up (lr/10 to lr). AAPL Transformer improved from Cycle 6 (-1.13) to 0.56, suggesting warm-up helps equity convergence. Effect confounded by adaptive seq_len and different data period.~~
+- ~~**Additional tickers for robustness (#6):** Added SPY and MSFT (daily, 5y). Both confirm models struggle vs buy-and-hold on trending equities. SPY best model (LSTM CLS, 0.41) well below baseline (0.98). MSFT similar pattern.~~
+- ~~**Volatility-regime-based short toggling (#7):** Implemented regime detection using rolling vs expanding mean volatility. Improves equity results (MSFT Transformer: 0.11 → 0.84 with 47 shorts disabled). No effect on crypto (consistently high volatility).~~
+
 ## Remaining
 
-1. **Per-model-ticker seq_len optimization:** Cycle 6 sweep shows large sensitivity to seq_len, but currently all models use the same value. Using per-model-ticker optimal seq_len could significantly improve results (e.g., ETH LSTM at seq_len=50 vs 30).
+1. **Ensemble with adaptive seq_len:** Cycle 7 ensembles were not produced despite alignment code being in place. The interaction between per-model adaptive seq_len and walk-forward window boundaries needs investigation. May need to ensure all models produce same-length predictions within each window.
 
-2. **AAPL Cycle 5 result fragility:** The Cycle 5 AAPL ensemble (Sharpe 0.39) did not replicate in Cycle 6 (-0.97). The result was sensitive to hold period changes (3→5) and additional model (GRU). Needs investigation into what made the Cycle 5 configuration work.
+2. **AAPL Cycle 5 result fragility:** Still unexplained. Cycle 5 ensemble (0.39) has not been replicated in Cycles 6 or 7. Likely an artifact of a specific configuration hitting a favorable market regime.
 
-3. **Transformer convergence (#8 from prior):** Transformer still shows higher initial loss than LSTM/GRU. Could benefit from pre-training, warm-up scheduling, or different initialization.
+3. **BTC low-trade regime persistence:** BTC Transformer continues to perform well with few trades (13 in Cycle 7, 2 in Cycle 6). The strategy appears to be selective timing rather than overfitting, but low trade counts make statistical evaluation unreliable.
 
-4. **BTC low-trade regime persistence:** BTC Transformer continues to achieve high Sharpe (5.30) with very few trades (2). This pattern persists across cycles, suggesting it's picking a single profitable regime rather than overfitting. But low trade count makes statistical evaluation impossible.
+4. **Cross-validated seq_len selection:** Current adaptive seq_len runs a full walk-forward sweep per model, which is computationally expensive (3 models x 4 seq_len levels = 12 full walk-forwards per ticker, before the actual experiment). A lighter inner validation loop would reduce runtime.
 
-5. **Cross-validated seq_len selection:** Current seq_len sweep uses full walk-forward per level, which is expensive. A lighter-weight inner validation loop for seq_len selection could be more practical.
+5. **Regime detection calibration:** The current high_vol_threshold=1.5 was chosen heuristically. The threshold may need per-ticker or per-interval calibration. Crypto sees no regime transitions because its volatility is uniformly elevated.
 
-6. **Additional tickers for robustness:** Only 3 tickers tested. Adding more equities (SPY, MSFT) and crypto (SOL, XRP) would help distinguish signal from noise in the results.
+6. **Model architecture search:** All models use the same hyperparameters (hidden_size=64, num_layers=2). Given that adaptive seq_len shows strong model-specific preferences, architecture parameters may also benefit from per-model optimization.
 
-7. **Volatility-regime-based short toggling:** Short positions still hurt crypto. A regime detector that only enables shorts in low-volatility trending markets could reduce losses.
+7. **Statistical significance gap:** After 7 cycles and 5 tickers, no model achieves statistical significance vs buy-and-hold (p < 0.05) in the desired direction. The walk-forward window count (3-4) limits statistical power. More windows or longer datasets could help, but may also confirm null results.

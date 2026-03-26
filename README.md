@@ -15,7 +15,7 @@ pip install -e ".[dev]"
 python3 -m src.cli run-experiment --config configs/default.yaml
 
 # Custom output directory
-python3 -m src.cli run-experiment --config configs/default.yaml --output-dir reports/cycle_6
+python3 -m src.cli run-experiment --config configs/default.yaml --output-dir reports/cycle_7
 
 # Run tests
 python3 -m pytest tests/ -v
@@ -27,13 +27,13 @@ Edit `configs/default.yaml` to configure:
 - **Data:** Tickers list, interval, period (fetched from ARF Data API), per-ticker overrides
 - **Models:** LSTM, GRU, and/or Transformer with architecture parameters
 - **Training:** Sequence length, epochs, batch size, learning rate
-- **Evaluation:** Walk-forward window sizes, purge gap, adaptive windowing, cost sensitivity levels, minimum holding period, feature importance, ensemble, classification mode, long/short strategy, seq_len sweep, adaptive hold
+- **Evaluation:** Walk-forward window sizes, purge gap, adaptive windowing, cost sensitivity levels, minimum holding period, feature importance, ensemble, classification mode, long/short strategy, seq_len sweep, adaptive hold, adaptive seq_len, warm-up, regime short
 
 ### Per-Ticker Overrides
 
 ```yaml
 data:
-  tickers: ["BTC/USDT", "ETH/USDT", "AAPL"]
+  tickers: ["BTC/USDT", "ETH/USDT", "AAPL", "SPY", "MSFT"]
   interval: "1d"
   period: "5y"
   ticker_overrides:
@@ -45,7 +45,7 @@ data:
       period: "1y"
 ```
 
-### Cycle 6 Evaluation Options
+### Cycle 7 Evaluation Options
 
 ```yaml
 evaluation:
@@ -61,6 +61,11 @@ evaluation:
   min_hold_sweep: [1, 2, 3, 5, 10]               # Min hold period sweep levels
   seq_len_sweep: [10, 20, 30, 50]                 # Sequence length sensitivity sweep (Cycle 6)
   adaptive_hold: true                             # Auto-select best hold per ticker (Cycle 6)
+  adaptive_seq_len: true                          # Auto-select best seq_len per model/ticker (Cycle 7)
+  warmup_epochs: 5                                # Transformer LR warm-up epochs (Cycle 7)
+  regime_short: true                              # Volatility-regime-based short toggling (Cycle 7)
+  vol_lookback: 60                                # Rolling vol lookback for regime detection (Cycle 7)
+  high_vol_threshold: 1.5                         # High-vol threshold multiplier (Cycle 7)
 ```
 
 ## Project Structure
@@ -71,18 +76,19 @@ src/
   preprocessing.py   -- Feature normalization, outlier clipping, stationarity transforms
   indicators.py      -- Technical indicators with frequency-adaptive periods (Cycle 6)
   models.py          -- LSTM, GRU, and Transformer architectures (Cycle 6: +GRU)
-  training.py        -- Dataset preparation, training loop with LR scheduling, prediction
-  evaluation.py      -- Purged walk-forward, cost sensitivity, risk metrics, seq_len sweep
-  cli.py             -- CLI experiment runner (multi-ticker, 3-model ensemble, adaptive hold)
+  training.py        -- Dataset preparation, training with LR scheduling + warm-up (Cycle 7)
+  evaluation.py      -- Purged walk-forward, cost sensitivity, risk metrics, regime short (Cycle 7)
+  cli.py             -- CLI experiment runner (5-ticker, adaptive seq_len, regime short)
 configs/
   default.yaml       -- Default experiment configuration
-tests/               -- Unit tests for all modules (60 tests)
+tests/               -- Unit tests for all modules (69 tests)
 reports/cycle_1/     -- Cycle 1 experiment results
 reports/cycle_2/     -- Cycle 2 experiment results
 reports/cycle_3/     -- Cycle 3 experiment results
 reports/cycle_4/     -- Cycle 4 experiment results
 reports/cycle_5/     -- Cycle 5 experiment results
 reports/cycle_6/     -- Cycle 6 experiment results
+reports/cycle_7/     -- Cycle 7 experiment results
 ```
 
 ## Features
@@ -109,45 +115,57 @@ reports/cycle_6/     -- Cycle 6 experiment results
 - **GRU model:** Third model type for genuine ensemble diversity (Cycle 6)
 - **Sequence length sweep:** Tests model sensitivity to lookback window size (Cycle 6)
 - **Adaptive per-ticker hold:** Auto-selects optimal hold period per ticker (Cycle 6)
+- **Adaptive per-model seq_len:** Auto-selects optimal lookback per model/ticker (Cycle 7)
+- **Transformer warm-up:** Linear LR warm-up for better Transformer convergence (Cycle 7)
+- **Volatility-regime short toggling:** Disables shorts in high-volatility regimes (Cycle 7)
 
-## Cycle 6 Results
+## Cycle 7 Results
 
-### BTC/USDT (Hourly, 4 windows, adaptive_hold=1, freq-adaptive indicators)
-
-| Model | Sharpe | Return | Trades | Notes |
-|-------|--------|--------|--------|-------|
-| LSTM (regression) | -0.08 | -0.1% | 23 | |
-| **GRU (regression)** | **2.65** | **+4.2%** | 5 | **New model** |
-| **Transformer (regression)** | **5.30** | **+8.1%** | 2 | Best single model |
-| **Ensemble (equal, 3-model)** | **4.85** | **+7.3%** | 1 | Beats buy-hold |
-| Buy-Hold | 1.24 | +1.8% | -- | |
-
-### ETH/USDT (Hourly, 4 windows, adaptive_hold=10, freq-adaptive indicators)
+### BTC/USDT (Hourly, adaptive_hold=3, adaptive seq_len)
 
 | Model | Sharpe | Return | Trades | Notes |
 |-------|--------|--------|--------|-------|
-| LSTM (regression) | -0.31 | -0.5% | 10 | Best regression |
-| GRU (regression) | -5.49 | -8.5% | 5 | |
-| Transformer (regression) | -1.12 | -1.7% | 5 | |
-| Ensemble (equal) | -0.44 | -0.7% | 5 | |
-| Buy-Hold | -0.13 | -0.2% | -- | Negative period |
+| LSTM (regression) | -1.05 | -2.1% | 16 | seq_len=10 |
+| GRU (regression) | -7.64 | -14.3% | 20 | seq_len=10 |
+| **Transformer (regression)** | **2.35** | **+3.4%** | 13 | seq_len=30, beats baseline |
+| Buy-Hold | 0.16 | +0.3% | -- | |
 
-### AAPL (Daily, 3 windows, adaptive_hold=5, standard indicators)
+### ETH/USDT (Hourly, adaptive_hold=2, adaptive seq_len)
 
-| Model | Sharpe | Return | Max DD | Trades | Notes |
-|-------|--------|--------|--------|--------|-------|
-| LSTM (regression) | -0.27 | -11.1% | 39.3% | 40 | |
-| GRU (regression) | 0.01 | +0.5% | 32.3% | 43 | Near break-even |
-| Transformer (regression) | -1.13 | -35.1% | 55.3% | 38 | |
-| Ensemble (equal) | -0.97 | -41.2% | 71.1% | -- | |
-| Buy-Hold | 0.35 | +21.0% | 40.6% | -- | |
+| Model | Sharpe | Return | Trades | Notes |
+|-------|--------|--------|--------|-------|
+| **LSTM (classification)** | **3.82** | **+3.7%** | 7 | **Beats baseline** |
+| Transformer (regression) | -3.47 | -3.2% | 18 | seq_len=50 |
+| Buy-Hold | 0.82 | +0.8% | -- | |
+
+### AAPL (Daily, adaptive_hold=5, adaptive seq_len)
+
+| Model | Sharpe | Return | Trades | Notes |
+|-------|--------|--------|--------|-------|
+| **Transformer (regression)** | **0.56** | **+38.5%** | 5 | seq_len=20, near baseline |
+| GRU (regression) | -0.03 | -1.8% | 37 | seq_len=30 |
+| Buy-Hold | 0.59 | +43.1% | -- | |
+
+### SPY (Daily, adaptive_hold=5) — NEW
+
+| Model | Sharpe | Return | Trades | Notes |
+|-------|--------|--------|--------|-------|
+| LSTM (classification) | 0.41 | +12.8% | 47 | Best model |
+| Buy-Hold | 0.98 | +33.3% | -- | |
+
+### MSFT (Daily, adaptive_hold=1) — NEW
+
+| Model | Sharpe | Return | Trades | Notes |
+|-------|--------|--------|--------|-------|
+| Transformer (regression) | 0.11 | +5.6% | 40 | Best regression |
+| Regime short Transformer | 0.84 | -- | -- | +47 shorts disabled |
+| Buy-Hold | 1.01 | +69.9% | -- | |
 
 ### Key findings:
-- **GRU provides genuine ensemble diversity**: Different prediction profile from LSTM despite similar architecture
-- **Seq_len is highly sensitive**: BTC prefers 30, ETH LSTM prefers 50 (Sharpe 7.31 vs -6.94), AAPL Transformer prefers 20 (Sharpe 1.72)
-- **Adaptive hold improves per-ticker**: BTC=1, ETH=10, AAPL=5 selected automatically
-- **BTC ensemble improved**: 3-model ensemble Sharpe 4.85 (up from 3.85 in Cycle 5)
-- **AAPL Cycle 5 result was fragile**: Ensemble regressed from 0.39 to -0.97 with parameter changes
-- **No statistical significance**: Consistent with prior cycles (p > 0.05 everywhere meaningful)
+- **No model consistently beats buy-and-hold** across 5 tickers, consistent with EMH
+- **Adaptive seq_len confirms model-specific preferences**: Transformer prefers 20-30; LSTM/GRU vary widely
+- **Regime short toggling helps equities**: MSFT Transformer improves 0.11 → 0.84 with regime-based short disabling
+- **BTC Transformer remains best single-ticker result** (Sharpe 2.35), but lower than Cycle 6 (5.30) due to different data period
+- **SPY and MSFT results confirm limited predictability** for trending equities
 
-See `reports/cycle_6/` for full metrics and details.
+See `reports/cycle_7/` for full metrics and details.

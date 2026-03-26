@@ -10,6 +10,9 @@ Cycle 5: Added long/short strategy, classification mode, min holding period
 sweep, and inverse-variance ensemble weighting.
 
 Cycle 6: Added sequence length sensitivity sweep, adaptive per-ticker hold period.
+
+Cycle 7: Added per-model-ticker adaptive seq_len selection,
+volatility-regime-based short toggling.
 """
 
 import logging
@@ -403,6 +406,7 @@ def walk_forward_validation(
     allow_short: bool = False,
     classification: bool = False,
     min_hold_sweep_levels: Optional[list[int]] = None,
+    warmup_epochs: int = 0,
 ) -> dict:
     """Run purged walk-forward validation.
 
@@ -458,6 +462,7 @@ def walk_forward_validation(
         train_model(
             model, train_ds, epochs=epochs, batch_size=batch_size, lr=lr,
             device=device, classification=classification,
+            warmup_epochs=warmup_epochs,
         )
 
         preds = predict(model, test_ds, device=device)
@@ -594,6 +599,7 @@ def seq_len_sensitivity_sweep(
     adaptive_window: bool = False,
     min_holding_period: int = 1,
     allow_short: bool = False,
+    warmup_epochs: int = 0,
 ) -> list[dict]:
     """Sweep sequence lengths to find optimal lookback window.
 
@@ -622,6 +628,7 @@ def seq_len_sensitivity_sweep(
             adaptive_window=adaptive_window,
             min_holding_period=min_holding_period,
             allow_short=allow_short,
+            warmup_epochs=warmup_epochs,
         )
         if "error" in wf_result:
             results.append({
@@ -654,3 +661,137 @@ def select_optimal_hold_period(
         return 1
     best = max(valid, key=lambda r: r["sharpe_ratio"])
     return best["min_hold"]
+
+
+def select_optimal_seq_len(
+    seq_len_sweep_results: list[dict],
+    default_seq_len: int = 30,
+) -> int:
+    """Select the optimal sequence length from sweep results.
+
+    Cycle 7: Picks the seq_len with the best Sharpe ratio from sweep.
+    Falls back to default if no valid results.
+    """
+    valid = [r for r in seq_len_sweep_results if "sharpe_ratio" in r and "error" not in r]
+    if not valid:
+        return default_seq_len
+    best = max(valid, key=lambda r: r["sharpe_ratio"])
+    return best["seq_len"]
+
+
+def compute_volatility_regime(
+    actual_returns: np.ndarray,
+    lookback: int = 60,
+    high_vol_threshold: float = 1.5,
+) -> np.ndarray:
+    """Classify each period as low-vol (0) or high-vol (1) regime.
+
+    Cycle 7: Uses rolling volatility relative to expanding historical mean.
+    High-vol regime = rolling vol > high_vol_threshold * expanding mean vol.
+    Returns array of 0/1 regime labels (same length as input).
+    """
+    n = len(actual_returns)
+    regime = np.zeros(n, dtype=float)
+    if n < lookback + 1:
+        return regime
+
+    rolling_vol = pd.Series(actual_returns).rolling(lookback).std().values
+
+    # Expanding mean of rolling vol (use only past data, no lookahead)
+    expanding_mean_vol = np.zeros(n)
+    vol_sum = 0.0
+    vol_count = 0
+    for i in range(n):
+        if not np.isnan(rolling_vol[i]):
+            vol_sum += rolling_vol[i]
+            vol_count += 1
+        expanding_mean_vol[i] = vol_sum / max(vol_count, 1)
+
+    for i in range(lookback, n):
+        if expanding_mean_vol[i] > 1e-10 and rolling_vol[i] > high_vol_threshold * expanding_mean_vol[i]:
+            regime[i] = 1.0
+
+    return regime
+
+
+def compute_trading_metrics_regime_short(
+    predictions: np.ndarray,
+    actual_returns: np.ndarray,
+    cost_bps: float = 10.0,
+    interval: str = "1d",
+    min_holding_period: int = 1,
+    classification: bool = False,
+    vol_lookback: int = 60,
+    high_vol_threshold: float = 1.5,
+) -> dict:
+    """Compute trading metrics with regime-based short toggling.
+
+    Cycle 7: Only allows short positions in low-volatility regimes.
+    In high-volatility regimes, shorts are disabled (position = max(position, 0)).
+    """
+    ann_factor = get_annualization_factor(interval)
+    cost = cost_bps / 10_000
+
+    # Generate base position (long/short)
+    if classification:
+        position = np.where(predictions > 0.5, 1.0, -1.0)
+    else:
+        position = np.sign(predictions)
+
+    # Compute volatility regime
+    regime = compute_volatility_regime(actual_returns, vol_lookback, high_vol_threshold)
+
+    # In high-vol regime, disable shorts (clamp to 0)
+    position = np.where((regime == 1.0) & (position < 0), 0.0, position)
+
+    position = _apply_min_holding_period(position, min_holding_period)
+    trades = np.abs(np.diff(position, prepend=0))
+
+    gross_returns = position * actual_returns
+    net_returns = gross_returns - trades * cost
+
+    total_return = np.expm1(np.sum(net_returns))
+    n_periods = len(net_returns)
+    annual_factor = ann_factor / max(n_periods, 1)
+    mean_ret = np.mean(net_returns)
+    std_ret = np.std(net_returns)
+    sharpe = (mean_ret / std_ret * np.sqrt(ann_factor)) if std_ret > 1e-10 else 0.0
+
+    downside = net_returns[net_returns < 0]
+    downside_std = np.sqrt(np.mean(downside**2)) if len(downside) > 0 else 1e-10
+    sortino = (mean_ret / downside_std * np.sqrt(ann_factor)) if downside_std > 1e-10 else 0.0
+
+    cum_returns = np.cumsum(net_returns)
+    running_max = np.maximum.accumulate(cum_returns)
+    drawdown = running_max - cum_returns
+    max_dd = float(np.max(drawdown)) if len(drawdown) > 0 else 0.0
+
+    ann_return = float(total_return * annual_factor)
+    calmar = ann_return / max_dd if max_dd > 1e-10 else 0.0
+
+    winning_periods = np.sum(net_returns > 0)
+    active_periods = np.sum(np.abs(position) > 0)
+    win_rate = winning_periods / max(active_periods, 1)
+
+    n_trades = int(np.sum(trades > 0))
+    total_cost = float(np.sum(trades * cost))
+
+    high_vol_periods = int(np.sum(regime == 1.0))
+    shorts_disabled = int(np.sum((regime == 1.0) & (np.sign(predictions) < 0)))
+
+    return {
+        "total_return": float(total_return),
+        "annualized_return": ann_return,
+        "sharpe_ratio": float(sharpe),
+        "sortino_ratio": float(sortino),
+        "max_drawdown": max_dd,
+        "calmar_ratio": float(calmar),
+        "win_rate": float(win_rate),
+        "n_trades": n_trades,
+        "total_cost": total_cost,
+        "n_periods": n_periods,
+        "mean_period_return": float(mean_ret),
+        "std_period_return": float(std_ret),
+        "high_vol_periods": high_vol_periods,
+        "shorts_disabled": shorts_disabled,
+    }

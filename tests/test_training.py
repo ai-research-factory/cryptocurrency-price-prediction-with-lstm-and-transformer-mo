@@ -75,3 +75,30 @@ def test_train_without_lr_scheduler():
 
     losses = train_model(model, train_ds, epochs=5, batch_size=16, use_lr_scheduler=False)
     assert len(losses) == 5
+
+
+def test_train_with_warmup():
+    """Cycle 7: Verify training works with warm-up epochs."""
+    np.random.seed(42)
+    features = np.random.randn(200, 5)
+    targets = np.random.randn(200)
+
+    train_ds, _, _, _ = prepare_data(features, targets, train_end=150, seq_len=10)
+    model = build_model("transformer", input_size=5, d_model=16, nhead=4, num_layers=1)
+
+    losses = train_model(model, train_ds, epochs=10, batch_size=16, warmup_epochs=3)
+    assert len(losses) == 10
+    assert all(l > 0 for l in losses)
+
+
+def test_warmup_zero_is_noop():
+    """Cycle 7: warmup_epochs=0 should behave same as before."""
+    np.random.seed(42)
+    features = np.random.randn(200, 5)
+    targets = np.random.randn(200)
+
+    train_ds, _, _, _ = prepare_data(features, targets, train_end=150, seq_len=10)
+    model = build_model("lstm", input_size=5, hidden_size=16, num_layers=1)
+
+    losses = train_model(model, train_ds, epochs=5, batch_size=16, warmup_epochs=0)
+    assert len(losses) == 5

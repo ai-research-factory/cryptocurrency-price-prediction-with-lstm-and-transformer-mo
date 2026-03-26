@@ -1,5 +1,5 @@
 data:
-  tickers: ["BTC/USDT", "ETH/USDT", "AAPL"]
+  tickers: ["BTC/USDT", "ETH/USDT", "AAPL", "SPY", "MSFT"]
   interval: "1d"
   period: "5y"
   # Per-ticker overrides for interval/period
@@ -64,3 +64,11 @@ evaluation:
   seq_len_sweep: [10, 20, 30, 50]
   # Cycle 6: adaptive per-ticker hold period (selects best from sweep)
   adaptive_hold: true
+  # Cycle 7: adaptive per-model-ticker seq_len (selects best from sweep)
+  adaptive_seq_len: true
+  # Cycle 7: Transformer warm-up epochs for better convergence
+  warmup_epochs: 5
+  # Cycle 7: volatility-regime-based short toggling
+  regime_short: true
+  vol_lookback: 60
+  high_vol_threshold: 1.5
