@@ -7,7 +7,7 @@ proj_659558c1
 Transformer, MultimodalForecasting
 
 ## Current Cycle
-7
+8
 
 ## Objective
 Implement, validate, and iteratively improve the paper's approach with production-quality standards.
@@ -88,8 +88,8 @@ Phase計画がないため、以下の一般ガイドラインに従ってくだ
 
 ## 出力ファイル
 以下のファイルを保存してから完了すること:
-- `reports/cycle_7/metrics.json` — 全メトリクスを構造化フォーマットで
-- `reports/cycle_7/technical_findings.md` — 実装内容、結果、観察事項
+- `reports/cycle_8/metrics.json` — 全メトリクスを構造化フォーマットで
+- `reports/cycle_8/technical_findings.md` — 実装内容、結果、観察事項
 - `docs/open_questions.md` — 未解決の疑問と仮定
 - `README.md` — 今回のサイクルで変わった内容を反映して更新（セットアップ手順、主要な結果、使い方など）
 

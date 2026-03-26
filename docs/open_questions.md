@@ -41,18 +41,24 @@
 - ~~**Additional tickers for robustness (#6):** Added SPY and MSFT (daily, 5y). Both confirm models struggle vs buy-and-hold on trending equities. SPY best model (LSTM CLS, 0.41) well below baseline (0.98). MSFT similar pattern.~~
 - ~~**Volatility-regime-based short toggling (#7):** Implemented regime detection using rolling vs expanding mean volatility. Improves equity results (MSFT Transformer: 0.11 → 0.84 with 47 shorts disabled). No effect on crypto (consistently high volatility).~~
 
+## Addressed in Cycle 8
+
+- ~~**Ensemble with adaptive seq_len (#1):** Fixed tail-alignment logic for prediction arrays of different lengths. Ensembles now work correctly with adaptive seq_len. BTC ensemble achieves Sharpe 7.10, best project result.~~
+- ~~**Regime detection calibration (#5):** Implemented per-ticker threshold sweep across [1.0, 1.25, 1.5, 2.0, 2.5]. Lower thresholds (1.0-1.25) generally better for equities. SPY Transformer prefers 2.0. MSFT GRU improves from 0.67 to 1.14 with threshold=1.0.~~
+- ~~**Model architecture search (#6):** Implemented per-model hidden size sweep [32, 64, 128]. Each model-ticker gets optimal architecture. No universal preference; smaller models (32) often selected, suggesting prior cycles were overfitting.~~
+
 ## Remaining
 
-1. **Ensemble with adaptive seq_len:** Cycle 7 ensembles were not produced despite alignment code being in place. The interaction between per-model adaptive seq_len and walk-forward window boundaries needs investigation. May need to ensure all models produce same-length predictions within each window.
+1. **AAPL Cycle 5 result fragility:** Still unexplained. Cycle 5 ensemble (0.39) has not been replicated in Cycles 6, 7, or 8. Likely an artifact of a specific configuration hitting a favorable market regime.
 
-2. **AAPL Cycle 5 result fragility:** Still unexplained. Cycle 5 ensemble (0.39) has not been replicated in Cycles 6 or 7. Likely an artifact of a specific configuration hitting a favorable market regime.
+2. **BTC low-trade regime persistence:** BTC models continue to perform well with few trades (2-11 in Cycle 8). BTC LSTM classification achieves Sharpe 2.04 with only 2 trades. Selective timing or luck is unclear with such low trade counts.
 
-3. **BTC low-trade regime persistence:** BTC Transformer continues to perform well with few trades (13 in Cycle 7, 2 in Cycle 6). The strategy appears to be selective timing rather than overfitting, but low trade counts make statistical evaluation unreliable.
+3. **Cross-validated seq_len selection:** Current adaptive seq_len runs a full walk-forward sweep per model per ticker, which with hidden size sweep compounds to (3 hidden sizes x 3 models + 4 seq_len x 3 models) = 21 full walk-forwards per ticker before the actual experiment. A lighter inner validation loop would reduce runtime.
 
-4. **Cross-validated seq_len selection:** Current adaptive seq_len runs a full walk-forward sweep per model, which is computationally expensive (3 models x 4 seq_len levels = 12 full walk-forwards per ticker, before the actual experiment). A lighter inner validation loop would reduce runtime.
+4. **Statistical significance gap:** After 8 cycles and 5 tickers, no model achieves statistical significance vs buy-and-hold (p < 0.05). Walk-forward window count (3) limits statistical power. SPY Transformer (p=0.35) is closest but still far from significant despite Sharpe 1.70.
 
-5. **Regime detection calibration:** The current high_vol_threshold=1.5 was chosen heuristically. The threshold may need per-ticker or per-interval calibration. Crypto sees no regime transitions because its volatility is uniformly elevated.
+5. **Ensemble model selection:** Current ensemble always includes all 3 models. SPY ensemble (Sharpe -1.27) is dragged down by weak LSTM/GRU while Transformer alone achieves 1.70. A selective ensemble that drops underperforming models could improve results.
 
-6. **Model architecture search:** All models use the same hyperparameters (hidden_size=64, num_layers=2). Given that adaptive seq_len shows strong model-specific preferences, architecture parameters may also benefit from per-model optimization.
+6. **num_layers search:** Hidden size is now adaptive but num_layers is still fixed at 2. Sweeping [1, 2, 3] could reveal model-specific preferences, especially for Transformer.
 
-7. **Statistical significance gap:** After 7 cycles and 5 tickers, no model achieves statistical significance vs buy-and-hold (p < 0.05) in the desired direction. The walk-forward window count (3-4) limits statistical power. More windows or longer datasets could help, but may also confirm null results.
+7. **Early stopping interaction with warm-up:** With early stopping patience=7 and warm-up epochs=5, Transformer may stop before warm-up effects fully manifest. May need to disable early stopping during warm-up phase or increase patience for Transformer.

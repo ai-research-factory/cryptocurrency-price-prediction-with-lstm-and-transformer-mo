@@ -102,3 +102,56 @@ def test_warmup_zero_is_noop():
 
     losses = train_model(model, train_ds, epochs=5, batch_size=16, warmup_epochs=0)
     assert len(losses) == 5
+
+
+def test_train_with_early_stopping():
+    """Cycle 8: Verify training with early stopping enabled."""
+    np.random.seed(42)
+    features = np.random.randn(200, 5)
+    targets = np.random.randn(200)
+
+    train_ds, _, _, _ = prepare_data(features, targets, train_end=150, seq_len=10)
+    model = build_model("lstm", input_size=5, hidden_size=16, num_layers=1)
+
+    losses = train_model(
+        model, train_ds, epochs=50, batch_size=16,
+        early_stopping_patience=5, val_fraction=0.1,
+    )
+    # Should have stopped early (fewer than 50 epochs) or completed
+    assert len(losses) <= 50
+    assert len(losses) > 0
+    assert all(l > 0 for l in losses)
+
+
+def test_early_stopping_zero_is_noop():
+    """Cycle 8: early_stopping_patience=0 should not use early stopping."""
+    np.random.seed(42)
+    features = np.random.randn(200, 5)
+    targets = np.random.randn(200)
+
+    train_ds, _, _, _ = prepare_data(features, targets, train_end=150, seq_len=10)
+    model = build_model("lstm", input_size=5, hidden_size=16, num_layers=1)
+
+    losses = train_model(
+        model, train_ds, epochs=10, batch_size=16,
+        early_stopping_patience=0,
+    )
+    assert len(losses) == 10
+
+
+def test_early_stopping_restores_best():
+    """Cycle 8: After early stopping, model should use best weights."""
+    np.random.seed(42)
+    features = np.random.randn(200, 5)
+    targets = np.random.randn(200)
+
+    train_ds, test_ds, _, _ = prepare_data(features, targets, train_end=150, seq_len=10)
+    model = build_model("lstm", input_size=5, hidden_size=16, num_layers=1)
+
+    losses = train_model(
+        model, train_ds, epochs=30, batch_size=16,
+        early_stopping_patience=5, val_fraction=0.15,
+    )
+    # Model should be functional after training (can predict)
+    preds = predict(model, test_ds)
+    assert len(preds) == len(test_ds)

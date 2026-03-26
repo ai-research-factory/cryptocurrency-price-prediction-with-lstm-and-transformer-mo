@@ -13,6 +13,9 @@ Cycle 6: Added sequence length sensitivity sweep, adaptive per-ticker hold perio
 
 Cycle 7: Added per-model-ticker adaptive seq_len selection,
 volatility-regime-based short toggling.
+
+Cycle 8: Added regime threshold calibration sweep, hidden size search,
+early stopping support.
 """
 
 import logging
@@ -407,6 +410,7 @@ def walk_forward_validation(
     classification: bool = False,
     min_hold_sweep_levels: Optional[list[int]] = None,
     warmup_epochs: int = 0,
+    early_stopping_patience: int = 0,
 ) -> dict:
     """Run purged walk-forward validation.
 
@@ -414,6 +418,7 @@ def walk_forward_validation(
     to prevent information leakage from overlapping sequences.
 
     Cycle 5: Added allow_short, classification, and min_hold_sweep_levels.
+    Cycle 8: Added early_stopping_patience for training.
     """
     n = len(features)
 
@@ -463,6 +468,7 @@ def walk_forward_validation(
             model, train_ds, epochs=epochs, batch_size=batch_size, lr=lr,
             device=device, classification=classification,
             warmup_epochs=warmup_epochs,
+            early_stopping_patience=early_stopping_patience,
         )
 
         preds = predict(model, test_ds, device=device)
@@ -600,6 +606,7 @@ def seq_len_sensitivity_sweep(
     min_holding_period: int = 1,
     allow_short: bool = False,
     warmup_epochs: int = 0,
+    early_stopping_patience: int = 0,
 ) -> list[dict]:
     """Sweep sequence lengths to find optimal lookback window.
 
@@ -629,6 +636,7 @@ def seq_len_sensitivity_sweep(
             min_holding_period=min_holding_period,
             allow_short=allow_short,
             warmup_epochs=warmup_epochs,
+            early_stopping_patience=early_stopping_patience,
         )
         if "error" in wf_result:
             results.append({
@@ -795,3 +803,145 @@ def compute_trading_metrics_regime_short(
         "high_vol_periods": high_vol_periods,
         "shorts_disabled": shorts_disabled,
     }
+
+
+def regime_threshold_sweep(
+    predictions: np.ndarray,
+    actual_returns: np.ndarray,
+    threshold_levels: list[float],
+    cost_bps: float = 10.0,
+    interval: str = "1d",
+    min_holding_period: int = 1,
+    classification: bool = False,
+    vol_lookback: int = 60,
+) -> list[dict]:
+    """Sweep volatility regime thresholds to find optimal per-ticker calibration.
+
+    Cycle 8: Evaluates regime-short strategy at different high_vol_threshold values.
+    """
+    results = []
+    for threshold in threshold_levels:
+        metrics = compute_trading_metrics_regime_short(
+            predictions, actual_returns, cost_bps, interval,
+            min_holding_period, classification=classification,
+            vol_lookback=vol_lookback, high_vol_threshold=threshold,
+        )
+        results.append({
+            "threshold": threshold,
+            "sharpe_ratio": metrics["sharpe_ratio"],
+            "sortino_ratio": metrics["sortino_ratio"],
+            "total_return": metrics["total_return"],
+            "n_trades": metrics["n_trades"],
+            "high_vol_periods": metrics["high_vol_periods"],
+            "shorts_disabled": metrics["shorts_disabled"],
+        })
+    return results
+
+
+def select_optimal_regime_threshold(
+    sweep_results: list[dict],
+    default_threshold: float = 1.5,
+) -> float:
+    """Select the regime threshold that maximizes Sharpe ratio.
+
+    Cycle 8: If no improvement over no-regime (threshold=inf), returns default.
+    """
+    valid = [r for r in sweep_results if "sharpe_ratio" in r]
+    if not valid:
+        return default_threshold
+    best = max(valid, key=lambda r: r["sharpe_ratio"])
+    return best["threshold"]
+
+
+def hidden_size_sweep(
+    features: np.ndarray,
+    targets: np.ndarray,
+    model_type: str,
+    model_kwargs: dict,
+    hidden_size_levels: list[int],
+    seq_len: int = 30,
+    train_size: int = 500,
+    test_size: int = 60,
+    step_size: int = 60,
+    epochs: int = 50,
+    batch_size: int = 32,
+    lr: float = 1e-3,
+    cost_bps: float = 10.0,
+    device: str = "cpu",
+    purge_gap: int = 0,
+    interval: str = "1d",
+    adaptive_window: bool = False,
+    min_holding_period: int = 1,
+    allow_short: bool = False,
+    warmup_epochs: int = 0,
+    early_stopping_patience: int = 0,
+) -> list[dict]:
+    """Sweep hidden sizes to find optimal architecture per model type.
+
+    Cycle 8: Evaluates model performance at different hidden_size values.
+    """
+    results = []
+    for hs in hidden_size_levels:
+        logger.info(f"  hidden_size sweep: testing hidden_size={hs} for {model_type}")
+        mkwargs = dict(model_kwargs)
+        # Set the appropriate size parameter
+        if model_type in ("lstm", "gru"):
+            mkwargs["hidden_size"] = hs
+        elif model_type == "transformer":
+            # For transformer, d_model must be divisible by nhead
+            nhead = mkwargs.get("nhead", 4)
+            d_model = max(hs, nhead)
+            d_model = d_model - (d_model % nhead)  # ensure divisible
+            mkwargs["d_model"] = d_model
+            mkwargs["dim_feedforward"] = d_model * 2
+
+        wf_result = walk_forward_validation(
+            features=features,
+            targets=targets,
+            model_type=model_type,
+            model_kwargs=mkwargs,
+            seq_len=seq_len,
+            train_size=train_size,
+            test_size=test_size,
+            step_size=step_size,
+            epochs=epochs,
+            batch_size=batch_size,
+            lr=lr,
+            cost_bps=cost_bps,
+            device=device,
+            purge_gap=purge_gap,
+            interval=interval,
+            adaptive_window=adaptive_window,
+            min_holding_period=min_holding_period,
+            allow_short=allow_short,
+            warmup_epochs=warmup_epochs,
+            early_stopping_patience=early_stopping_patience,
+        )
+        if "error" in wf_result:
+            results.append({
+                "hidden_size": hs,
+                "error": wf_result["error"],
+            })
+        else:
+            agg = wf_result["aggregate"]
+            results.append({
+                "hidden_size": hs,
+                "sharpe_ratio": agg["sharpe_ratio"],
+                "sortino_ratio": agg["sortino_ratio"],
+                "total_return": agg["total_return"],
+                "n_trades": agg["n_trades"],
+                "n_windows": wf_result["n_windows"],
+            })
+    return results
+
+
+def select_optimal_hidden_size(
+    sweep_results: list[dict],
+    default_hidden_size: int = 64,
+) -> int:
+    """Select the hidden size with best Sharpe ratio."""
+    valid = [r for r in sweep_results if "sharpe_ratio" in r and "error" not in r]
+    if not valid:
+        return default_hidden_size
+    best = max(valid, key=lambda r: r["sharpe_ratio"])
+    return best["hidden_size"]

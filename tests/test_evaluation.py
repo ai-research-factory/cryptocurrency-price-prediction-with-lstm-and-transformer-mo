@@ -15,6 +15,9 @@ from src.evaluation import (
     select_optimal_seq_len,
     compute_volatility_regime,
     compute_trading_metrics_regime_short,
+    regime_threshold_sweep,
+    select_optimal_regime_threshold,
+    select_optimal_hidden_size,
 )
 
 
@@ -284,3 +287,83 @@ def test_regime_short_vs_full_short():
     )
     # Regime short should have fewer or equal trades than full short
     assert regime["n_trades"] <= full_short["n_trades"] + 5  # small tolerance
+
+
+# Cycle 8 tests
+
+def test_regime_threshold_sweep():
+    """Sweep should return results for each threshold level."""
+    rng = np.random.RandomState(42)
+    low_vol = rng.randn(100) * 0.001
+    high_vol = rng.randn(100) * 0.01
+    actuals = np.concatenate([low_vol, high_vol])
+    preds = np.concatenate([rng.randn(100) * 0.001, rng.randn(100) * 0.01])
+
+    levels = [1.0, 1.5, 2.0, 2.5]
+    results = regime_threshold_sweep(
+        preds, actuals, threshold_levels=levels,
+        cost_bps=10, vol_lookback=30,
+    )
+    assert len(results) == 4
+    for r in results:
+        assert "threshold" in r
+        assert "sharpe_ratio" in r
+        assert "shorts_disabled" in r
+
+
+def test_select_optimal_regime_threshold():
+    """Should select threshold with best Sharpe."""
+    sweep_results = [
+        {"threshold": 1.0, "sharpe_ratio": 0.5, "shorts_disabled": 20},
+        {"threshold": 1.5, "sharpe_ratio": 1.2, "shorts_disabled": 10},
+        {"threshold": 2.0, "sharpe_ratio": 0.8, "shorts_disabled": 5},
+    ]
+    assert select_optimal_regime_threshold(sweep_results) == 1.5
+
+
+def test_select_optimal_regime_threshold_empty():
+    """Should return default when no valid results."""
+    assert select_optimal_regime_threshold([], default_threshold=1.5) == 1.5
+
+
+def test_select_optimal_hidden_size():
+    """Should select hidden_size with best Sharpe."""
+    sweep_results = [
+        {"hidden_size": 32, "sharpe_ratio": 0.3},
+        {"hidden_size": 64, "sharpe_ratio": 1.0},
+        {"hidden_size": 128, "sharpe_ratio": 0.7},
+    ]
+    assert select_optimal_hidden_size(sweep_results) == 64
+
+
+def test_select_optimal_hidden_size_with_errors():
+    """Should skip entries with errors."""
+    sweep_results = [
+        {"hidden_size": 32, "error": "fail"},
+        {"hidden_size": 64, "sharpe_ratio": 0.5},
+    ]
+    assert select_optimal_hidden_size(sweep_results) == 64
+
+
+def test_select_optimal_hidden_size_empty():
+    """Should return default when no valid results."""
+    assert select_optimal_hidden_size([], default_hidden_size=64) == 64
+
+
+def test_regime_threshold_sweep_monotonic_shorts():
+    """Higher threshold should disable fewer shorts (less restrictive)."""
+    rng = np.random.RandomState(42)
+    low_vol = rng.randn(100) * 0.001
+    high_vol = rng.randn(100) * 0.01
+    actuals = np.concatenate([low_vol, high_vol])
+    preds = np.concatenate([rng.randn(100) * 0.001, rng.randn(100) * 0.01])
+
+    levels = [1.0, 1.5, 2.0, 3.0]
+    results = regime_threshold_sweep(
+        preds, actuals, threshold_levels=levels,
+        cost_bps=10, vol_lookback=30,
+    )
+    shorts = [r["shorts_disabled"] for r in results]
+    # Higher threshold → fewer shorts disabled (monotonically non-increasing)
+    for i in range(len(shorts) - 1):
+        assert shorts[i] >= shorts[i + 1]

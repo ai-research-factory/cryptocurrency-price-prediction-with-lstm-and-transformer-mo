@@ -3,6 +3,7 @@
 Cycle 4: Added learning rate scheduling (ReduceLROnPlateau).
 Cycle 5: Added classification mode (BCE loss for direction prediction).
 Cycle 7: Added linear warm-up LR scheduling for Transformer convergence.
+Cycle 8: Added early stopping with validation split to reduce overfitting.
 """
 
 import logging
@@ -81,25 +82,42 @@ def train_model(
     use_lr_scheduler: bool = True,
     classification: bool = False,
     warmup_epochs: int = 0,
+    early_stopping_patience: int = 0,
+    val_fraction: float = 0.1,
 ) -> list[float]:
     """Train model and return loss history.
 
     Cycle 4: Added ReduceLROnPlateau scheduler for better convergence.
     Cycle 5: Added classification mode with BCE loss.
     Cycle 7: Added linear warm-up for Transformer convergence.
+    Cycle 8: Added early stopping with validation split.
     warmup_epochs: number of epochs for linear LR warm-up from lr/10 to lr.
+    early_stopping_patience: stop if val loss doesn't improve for this many epochs (0=disabled).
+    val_fraction: fraction of training data to use for validation when early stopping is enabled.
     """
+    import copy
+
     model = model.to(device)
-    model.train()
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
     criterion = torch.nn.BCELoss() if classification else torch.nn.MSELoss()
-    loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True)
+
+    # Split train_ds into train/val if early stopping is enabled
+    val_loader = None
+    if early_stopping_patience > 0 and len(train_ds) > 10:
+        n_val = max(1, int(len(train_ds) * val_fraction))
+        n_train = len(train_ds) - n_val
+        # Use last portion as val (preserves temporal ordering)
+        train_subset = torch.utils.data.Subset(train_ds, range(n_train))
+        val_subset = torch.utils.data.Subset(train_ds, range(n_train, n_train + n_val))
+        loader = DataLoader(train_subset, batch_size=batch_size, shuffle=True)
+        val_loader = DataLoader(val_subset, batch_size=batch_size, shuffle=False)
+    else:
+        loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True)
 
     scheduler = None
     warmup_scheduler = None
 
     if warmup_epochs > 0:
-        # Linear warm-up: start at lr/10, ramp to lr over warmup_epochs
         warmup_scheduler = torch.optim.lr_scheduler.LinearLR(
             optimizer, start_factor=0.1, end_factor=1.0, total_iters=warmup_epochs,
         )
@@ -110,7 +128,12 @@ def train_model(
         )
 
     losses = []
+    best_val_loss = float("inf")
+    best_model_state = None
+    patience_counter = 0
+
     for epoch in range(epochs):
+        model.train()
         epoch_loss = 0.0
         n_batches = 0
         for x_batch, y_batch in loader:
@@ -136,6 +159,35 @@ def train_model(
         if (epoch + 1) % 10 == 0:
             current_lr = optimizer.param_groups[0]["lr"]
             logger.info(f"Epoch {epoch+1}/{epochs} - Loss: {avg_loss:.6f} - LR: {current_lr:.2e}")
+
+        # Early stopping check
+        if val_loader is not None and early_stopping_patience > 0:
+            model.eval()
+            val_loss = 0.0
+            val_batches = 0
+            with torch.no_grad():
+                for x_batch, y_batch in val_loader:
+                    x_batch, y_batch = x_batch.to(device), y_batch.to(device)
+                    pred = model(x_batch)
+                    val_loss += criterion(pred, y_batch).item()
+                    val_batches += 1
+            avg_val_loss = val_loss / max(val_batches, 1)
+
+            if avg_val_loss < best_val_loss - 1e-6:
+                best_val_loss = avg_val_loss
+                best_model_state = copy.deepcopy(model.state_dict())
+                patience_counter = 0
+            else:
+                patience_counter += 1
+
+            if patience_counter >= early_stopping_patience:
+                logger.info(f"Early stopping at epoch {epoch+1} (val_loss={avg_val_loss:.6f}, "
+                            f"best={best_val_loss:.6f})")
+                break
+
+    # Restore best model if early stopping was used
+    if best_model_state is not None:
+        model.load_state_dict(best_model_state)
 
     return losses
 

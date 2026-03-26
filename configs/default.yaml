@@ -72,3 +72,10 @@ evaluation:
   regime_short: true
   vol_lookback: 60
   high_vol_threshold: 1.5
+  # Cycle 8: early stopping to reduce overfitting (patience in epochs, 0=disabled)
+  early_stopping_patience: 7
+  # Cycle 8: per-ticker regime threshold calibration
+  regime_threshold_sweep: [1.0, 1.25, 1.5, 2.0, 2.5]
+  # Cycle 8: per-model hidden size search
+  hidden_size_sweep: [32, 64, 128]
+  adaptive_hidden_size: true
