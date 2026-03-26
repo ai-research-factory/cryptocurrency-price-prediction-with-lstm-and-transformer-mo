@@ -13,6 +13,7 @@ from src.indicators import (
     bollinger_bands,
     historical_volatility,
     compute_all_indicators,
+    get_indicator_periods,
 )
 
 
@@ -97,3 +98,29 @@ def test_compute_all_indicators(sample_ohlcv):
     for col in expected_cols:
         assert col in features.columns, f"Missing column: {col}"
     assert len(features) == len(sample_ohlcv)
+
+
+def test_get_indicator_periods_daily():
+    periods = get_indicator_periods("1d")
+    assert periods["rsi"] == 14
+    assert periods["macd_fast"] == 12
+    assert periods["macd_slow"] == 26
+
+
+def test_get_indicator_periods_hourly():
+    periods = get_indicator_periods("1h")
+    assert periods["rsi"] == 24
+    assert periods["macd_fast"] == 24
+    assert periods["macd_slow"] == 48
+
+
+def test_compute_all_indicators_hourly(sample_ohlcv):
+    """Indicators with hourly interval should use different periods but produce same columns."""
+    features = compute_all_indicators(sample_ohlcv, interval="1h")
+    expected_cols = [
+        "rsi", "macd", "macd_signal", "macd_hist", "roc_10",
+        "stoch_k", "atr", "bb_bandwidth", "bb_pct", "hist_vol",
+        "log_return", "volume_change",
+    ]
+    for col in expected_cols:
+        assert col in features.columns, f"Missing column: {col}"

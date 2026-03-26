@@ -11,6 +11,7 @@ from src.evaluation import (
     get_annualization_factor,
     _compute_adaptive_window_sizes,
     _apply_min_holding_period,
+    select_optimal_hold_period,
 )
 
 
@@ -175,3 +176,29 @@ def test_cost_sensitivity_with_min_hold():
     results_no_hold = cost_sensitivity_analysis(preds, actuals, levels, min_holding_period=1)
     # With min hold, cost at 10 bps should be lower
     assert results_hold[1]["total_cost"] <= results_no_hold[1]["total_cost"]
+
+
+# Cycle 6 tests
+
+def test_select_optimal_hold_period():
+    """Should select the hold period with best Sharpe."""
+    sweep_results = [
+        {"min_hold": 1, "sharpe_ratio": 0.5},
+        {"min_hold": 3, "sharpe_ratio": 1.2},
+        {"min_hold": 5, "sharpe_ratio": 0.8},
+    ]
+    assert select_optimal_hold_period(sweep_results) == 3
+
+
+def test_select_optimal_hold_period_empty():
+    """Should default to 1 when no valid results."""
+    assert select_optimal_hold_period([]) == 1
+
+
+def test_select_optimal_hold_period_negative():
+    """Should pick least-negative Sharpe."""
+    sweep_results = [
+        {"min_hold": 1, "sharpe_ratio": -2.0},
+        {"min_hold": 5, "sharpe_ratio": -0.5},
+    ]
+    assert select_optimal_hold_period(sweep_results) == 5

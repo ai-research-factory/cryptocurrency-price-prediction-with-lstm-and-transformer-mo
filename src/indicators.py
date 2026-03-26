@@ -1,7 +1,62 @@
-"""Technical indicators: momentum and volatility."""
+"""Technical indicators: momentum and volatility.
+
+Cycle 6: Added frequency-adaptive indicator periods for hourly data.
+"""
 
 import numpy as np
 import pandas as pd
+
+
+# Default indicator periods (designed for daily data)
+DEFAULT_PERIODS = {
+    "rsi": 14,
+    "macd_fast": 12,
+    "macd_slow": 26,
+    "macd_signal": 9,
+    "roc": 10,
+    "stoch": 14,
+    "atr": 14,
+    "bb": 20,
+    "hist_vol": 20,
+}
+
+# Hourly periods: scale by ~24 to represent one daily cycle in hourly bars
+# Use round numbers that are practical for hourly trading
+HOURLY_PERIODS = {
+    "rsi": 24,
+    "macd_fast": 24,
+    "macd_slow": 48,
+    "macd_signal": 12,
+    "roc": 24,
+    "stoch": 24,
+    "atr": 24,
+    "bb": 48,
+    "hist_vol": 48,
+}
+
+
+def get_indicator_periods(interval: str = "1d") -> dict:
+    """Return indicator periods appropriate for the data frequency.
+
+    Cycle 6: Adjusts indicator lookback windows for hourly data to align
+    with daily cycles, addressing OQ #2 (indicator periods for different frequencies).
+    """
+    if interval in ("1h", "2h"):
+        return HOURLY_PERIODS
+    elif interval in ("4h",):
+        # 4h: scale by ~6 from daily
+        return {
+            "rsi": 18,
+            "macd_fast": 18,
+            "macd_slow": 36,
+            "macd_signal": 9,
+            "roc": 18,
+            "stoch": 18,
+            "atr": 18,
+            "bb": 30,
+            "hist_vol": 30,
+        }
+    return DEFAULT_PERIODS
 
 
 def rsi(close: pd.Series, period: int = 14) -> pd.Series:
@@ -66,25 +121,36 @@ def historical_volatility(close: pd.Series, period: int = 20) -> pd.Series:
     return log_returns.rolling(period).std() * np.sqrt(252)
 
 
-def compute_all_indicators(df: pd.DataFrame) -> pd.DataFrame:
-    """Compute all technical indicators and return feature DataFrame."""
+def compute_all_indicators(df: pd.DataFrame, interval: str = "1d") -> pd.DataFrame:
+    """Compute all technical indicators and return feature DataFrame.
+
+    Cycle 6: Added interval parameter for frequency-adaptive indicator periods.
+    """
+    periods = get_indicator_periods(interval)
     features = pd.DataFrame(index=df.index)
 
     # Momentum indicators
-    features["rsi"] = rsi(df["close"])
-    macd_line, macd_signal, macd_hist = macd(df["close"])
+    features["rsi"] = rsi(df["close"], period=periods["rsi"])
+    macd_line, macd_signal_line, macd_hist = macd(
+        df["close"], fast=periods["macd_fast"],
+        slow=periods["macd_slow"], signal=periods["macd_signal"],
+    )
     features["macd"] = macd_line
-    features["macd_signal"] = macd_signal
+    features["macd_signal"] = macd_signal_line
     features["macd_hist"] = macd_hist
-    features["roc_10"] = rate_of_change(df["close"], 10)
-    features["stoch_k"] = stochastic_oscillator(df["high"], df["low"], df["close"])
+    features["roc_10"] = rate_of_change(df["close"], periods["roc"])
+    features["stoch_k"] = stochastic_oscillator(
+        df["high"], df["low"], df["close"], period=periods["stoch"],
+    )
 
     # Volatility indicators
-    features["atr"] = atr(df["high"], df["low"], df["close"])
-    bb_upper, bb_mid, bb_lower, bb_bw = bollinger_bands(df["close"])
+    features["atr"] = atr(df["high"], df["low"], df["close"], period=periods["atr"])
+    bb_upper, bb_mid, bb_lower, bb_bw = bollinger_bands(
+        df["close"], period=periods["bb"],
+    )
     features["bb_bandwidth"] = bb_bw
     features["bb_pct"] = (df["close"] - bb_lower) / (bb_upper - bb_lower)
-    features["hist_vol"] = historical_volatility(df["close"])
+    features["hist_vol"] = historical_volatility(df["close"], period=periods["hist_vol"])
 
     # Price-based
     features["log_return"] = np.log(df["close"] / df["close"].shift(1))

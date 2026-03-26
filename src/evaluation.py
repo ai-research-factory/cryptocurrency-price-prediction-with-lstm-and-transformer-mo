@@ -8,6 +8,8 @@ and ensemble prediction support.
 
 Cycle 5: Added long/short strategy, classification mode, min holding period
 sweep, and inverse-variance ensemble weighting.
+
+Cycle 6: Added sequence length sensitivity sweep, adaptive per-ticker hold period.
 """
 
 import logging
@@ -571,3 +573,84 @@ def walk_forward_validation(
         result["min_hold_sweep"] = hold_sweep
 
     return result
+
+
+def seq_len_sensitivity_sweep(
+    features: np.ndarray,
+    targets: np.ndarray,
+    model_type: str,
+    model_kwargs: dict,
+    seq_len_levels: list[int],
+    train_size: int = 500,
+    test_size: int = 60,
+    step_size: int = 60,
+    epochs: int = 50,
+    batch_size: int = 32,
+    lr: float = 1e-3,
+    cost_bps: float = 10.0,
+    device: str = "cpu",
+    purge_gap: int = 0,
+    interval: str = "1d",
+    adaptive_window: bool = False,
+    min_holding_period: int = 1,
+    allow_short: bool = False,
+) -> list[dict]:
+    """Sweep sequence lengths to find optimal lookback window.
+
+    Cycle 6: Evaluates model performance at different seq_len values.
+    Runs a single walk-forward pass per seq_len for efficiency.
+    """
+    results = []
+    for seq_len in seq_len_levels:
+        logger.info(f"  seq_len sweep: testing seq_len={seq_len}")
+        wf_result = walk_forward_validation(
+            features=features,
+            targets=targets,
+            model_type=model_type,
+            model_kwargs=model_kwargs,
+            seq_len=seq_len,
+            train_size=train_size,
+            test_size=test_size,
+            step_size=step_size,
+            epochs=epochs,
+            batch_size=batch_size,
+            lr=lr,
+            cost_bps=cost_bps,
+            device=device,
+            purge_gap=purge_gap,
+            interval=interval,
+            adaptive_window=adaptive_window,
+            min_holding_period=min_holding_period,
+            allow_short=allow_short,
+        )
+        if "error" in wf_result:
+            results.append({
+                "seq_len": seq_len,
+                "error": wf_result["error"],
+            })
+        else:
+            agg = wf_result["aggregate"]
+            results.append({
+                "seq_len": seq_len,
+                "sharpe_ratio": agg["sharpe_ratio"],
+                "sortino_ratio": agg["sortino_ratio"],
+                "total_return": agg["total_return"],
+                "n_trades": agg["n_trades"],
+                "n_windows": wf_result["n_windows"],
+            })
+    return results
+
+
+def select_optimal_hold_period(
+    hold_sweep_results: list[dict],
+) -> int:
+    """Select the optimal minimum holding period from sweep results.
+
+    Cycle 6: Picks the hold period with the best Sharpe ratio.
+    Returns the optimal min_hold value.
+    """
+    valid = [r for r in hold_sweep_results if "sharpe_ratio" in r]
+    if not valid:
+        return 1
+    best = max(valid, key=lambda r: r["sharpe_ratio"])
+    return best["min_hold"]

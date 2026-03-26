@@ -1,6 +1,7 @@
-"""LSTM and Transformer models for price prediction.
+"""LSTM, GRU, and Transformer models for price prediction.
 
 Cycle 5: Added classification mode (direction prediction with sigmoid output).
+Cycle 6: Added GRU model for ensemble diversity.
 """
 
 import math
@@ -36,6 +37,45 @@ class LSTMPredictor(nn.Module):
         # x: (batch, seq_len, features)
         lstm_out, _ = self.lstm(x)
         last_hidden = lstm_out[:, -1, :]  # take last timestep
+        out = self.dropout(last_hidden)
+        logits = self.fc(out).squeeze(-1)
+        if self.classification:
+            return torch.sigmoid(logits)
+        return logits
+
+
+class GRUPredictor(nn.Module):
+    """GRU model for time-series prediction.
+
+    Cycle 6: Added as a third model to improve ensemble diversity.
+    GRU is a simpler alternative to LSTM with fewer parameters,
+    which can provide different prediction characteristics for ensembling.
+    """
+
+    def __init__(
+        self,
+        input_size: int,
+        hidden_size: int = 64,
+        num_layers: int = 2,
+        dropout: float = 0.2,
+        classification: bool = False,
+    ):
+        super().__init__()
+        self.classification = classification
+        self.gru = nn.GRU(
+            input_size=input_size,
+            hidden_size=hidden_size,
+            num_layers=num_layers,
+            dropout=dropout if num_layers > 1 else 0.0,
+            batch_first=True,
+        )
+        self.dropout = nn.Dropout(dropout)
+        self.fc = nn.Linear(hidden_size, 1)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # x: (batch, seq_len, features)
+        gru_out, _ = self.gru(x)
+        last_hidden = gru_out[:, -1, :]  # take last timestep
         out = self.dropout(last_hidden)
         logits = self.fc(out).squeeze(-1)
         if self.classification:
@@ -107,6 +147,9 @@ def build_model(model_type: str, input_size: int, **kwargs) -> nn.Module:
     if model_type == "lstm":
         valid = {"hidden_size", "num_layers", "dropout", "classification"}
         return LSTMPredictor(input_size, **{k: v for k, v in kwargs.items() if k in valid})
+    elif model_type == "gru":
+        valid = {"hidden_size", "num_layers", "dropout", "classification"}
+        return GRUPredictor(input_size, **{k: v for k, v in kwargs.items() if k in valid})
     elif model_type == "transformer":
         valid = {"d_model", "nhead", "num_layers", "dim_feedforward", "dropout", "classification"}
         return TransformerPredictor(input_size, **{k: v for k, v in kwargs.items() if k in valid})
