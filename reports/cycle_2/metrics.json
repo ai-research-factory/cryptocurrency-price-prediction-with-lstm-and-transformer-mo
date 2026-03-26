@@ -1,0 +1,148 @@
+{
+  "tickers": [
+    "BTC/USDT",
+    "AAPL"
+  ],
+  "per_ticker": {
+    "BTC/USDT": {
+      "n_samples": 686,
+      "n_features": 12,
+      "data_summary": {
+        "ticker": "BTC/USDT",
+        "n_rows": 720,
+        "date_range": [
+          "2026-02-24 20:00:00",
+          "2026-03-26 19:00:00"
+        ],
+        "price_range": [
+          63216.01,
+          75623.91
+        ],
+        "mean_daily_return": 8.265543910037016e-05,
+        "std_daily_return": 0.005646857548901564,
+        "annualized_volatility": 0.08964108458040776,
+        "skewness": 0.29884339036690205,
+        "kurtosis": 5.580233480277844,
+        "mean_volume": 984.0392265555555
+      },
+      "models": {
+        "lstm": {
+          "aggregate": {
+            "total_return": -0.0065724268807226234,
+            "annualized_return": -0.02760419289903502,
+            "sharpe_ratio": -0.7914502334423125,
+            "max_drawdown": 0.019493506311191202,
+            "win_rate": 0.4375,
+            "n_trades": 8,
+            "n_days": 60,
+            "mean_daily_return": -0.00010990200638594464,
+            "std_daily_return": 0.0022043587722722128
+          },
+          "baseline_buy_hold": {
+            "total_return": 0.031265996987798916,
+            "annualized_return": 0.13131718734875544,
+            "sharpe_ratio": 1.4140286084007452,
+            "max_drawdown": 0.019061732793305006,
+            "n_days": 60
+          },
+          "stability_ratio": 0.5,
+          "n_windows": 2,
+          "positive_windows": 1
+        },
+        "transformer": {
+          "aggregate": {
+            "total_return": 0.03088292223741496,
+            "annualized_return": 0.12970827339714283,
+            "sharpe_ratio": 1.5379307891014995,
+            "max_drawdown": 0.019061732793305006,
+            "win_rate": 0.5384615384615384,
+            "n_trades": 7,
+            "n_days": 60,
+            "mean_daily_return": 0.0005069273517666693,
+            "std_daily_return": 0.005232499596427484
+          },
+          "baseline_buy_hold": {
+            "total_return": 0.031265996987798916,
+            "annualized_return": 0.13131718734875544,
+            "sharpe_ratio": 1.4140286084007452,
+            "max_drawdown": 0.019061732793305006,
+            "n_days": 60
+          },
+          "stability_ratio": 0.5,
+          "n_windows": 2,
+          "positive_windows": 1
+        }
+      }
+    },
+    "AAPL": {
+      "n_samples": 1222,
+      "n_features": 12,
+      "data_summary": {
+        "ticker": "AAPL",
+        "n_rows": 1256,
+        "date_range": [
+          "2021-03-26 00:00:00",
+          "2026-03-26 00:00:00"
+        ],
+        "price_range": [
+          116.78206634521484,
+          285.9224548339844
+        ],
+        "mean_daily_return": 0.0006163294036138134,
+        "std_daily_return": 0.01722723019100657,
+        "annualized_volatility": 0.2734738011832028,
+        "skewness": 0.243706421305607,
+        "kurtosis": 5.9688080890255675,
+        "mean_volume": 66907698.63773885
+      },
+      "models": {
+        "lstm": {
+          "aggregate": {
+            "total_return": -0.30809830393200005,
+            "annualized_return": -0.23527506845716367,
+            "sharpe_ratio": -1.2690256665894777,
+            "max_drawdown": 0.5652387279477266,
+            "win_rate": 0.4816753926701571,
+            "n_trades": 52,
+            "n_days": 330,
+            "mean_daily_return": -0.0011160951247297616,
+            "std_daily_return": 0.01396146768628824
+          },
+          "baseline_buy_hold": {
+            "total_return": -0.16878668973960811,
+            "annualized_return": -0.12889165398297348,
+            "sharpe_ratio": -0.5528197548516729,
+            "max_drawdown": 0.48342509749660634,
+            "n_days": 330
+          },
+          "stability_ratio": 0.45454545454545453,
+          "n_windows": 11,
+          "positive_windows": 5
+        },
+        "transformer": {
+          "aggregate": {
+            "total_return": 0.020688244150860787,
+            "annualized_return": 0.0157982955333846,
+            "sharpe_ratio": 0.08323844942531944,
+            "max_drawdown": 0.2417540124509835,
+            "win_rate": 0.5243243243243243,
+            "n_trades": 38,
+            "n_days": 330,
+            "mean_daily_return": 6.205196643278893e-05,
+            "std_daily_return": 0.011834007433618692
+          },
+          "baseline_buy_hold": {
+            "total_return": -0.16878668973960811,
+            "annualized_return": -0.12889165398297348,
+            "sharpe_ratio": -0.5528197548516729,
+            "max_drawdown": 0.48342509749660634,
+            "n_days": 330
+          },
+          "stability_ratio": 0.5454545454545454,
+          "n_windows": 11,
+          "positive_windows": 6
+        }
+      }
+    }
+  }
+}

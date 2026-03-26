@@ -1,7 +1,12 @@
 data:
-  ticker: "AAPL"
+  tickers: ["BTC/USDT", "AAPL"]
   interval: "1d"
   period: "5y"
+  # Per-ticker overrides for interval/period
+  ticker_overrides:
+    "BTC/USDT":
+      interval: "1h"
+      period: "1y"
 
 model:
   types: ["lstm", "transformer"]

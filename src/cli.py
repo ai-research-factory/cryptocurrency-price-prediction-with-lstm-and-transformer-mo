@@ -10,8 +10,9 @@ import numpy as np
 import pandas as pd
 import yaml
 
-from .data import fetch_ohlcv, compute_returns
+from .data import fetch_ohlcv, compute_returns, validate_ohlcv, clean_ohlcv, compute_data_summary
 from .indicators import compute_all_indicators
+from .preprocessing import preprocess_features, compute_feature_stats
 from .evaluation import walk_forward_validation
 
 logging.basicConfig(
@@ -26,98 +27,159 @@ def load_config(config_path: str) -> dict:
         return yaml.safe_load(f)
 
 
+def prepare_ticker_data(ticker: str, data_cfg: dict) -> tuple[pd.DataFrame, pd.DataFrame, dict]:
+    """Fetch, validate, clean, and prepare features for a single ticker.
+
+    Returns (features_df, ohlcv_df, data_report).
+    """
+    # Support per-ticker overrides for interval/period
+    overrides = data_cfg.get("ticker_overrides", {}).get(ticker, {})
+    interval = overrides.get("interval", data_cfg.get("interval", "1d"))
+    period = overrides.get("period", data_cfg.get("period", "5y"))
+
+    # Fetch raw data
+    df = fetch_ohlcv(
+        ticker=ticker,
+        interval=interval,
+        period=period,
+    )
+
+    # Validate raw data
+    validation = validate_ohlcv(df)
+    logger.info(f"Validation for {ticker}: {len(df)} rows, "
+                f"issues: {validation['issues'] or 'none'}")
+
+    # Clean data
+    df = clean_ohlcv(df)
+
+    # Compute summary stats
+    summary = compute_data_summary(df, ticker)
+
+    # Compute indicators
+    features_df = compute_all_indicators(df)
+
+    # Preprocess: normalize price-scale indicators, handle outliers
+    features_df = preprocess_features(features_df, df)
+
+    data_report = {
+        "validation": validation,
+        "summary": summary,
+        "n_rows_after_clean": len(df),
+    }
+
+    return features_df, df, data_report
+
+
 def run_experiment(config: dict) -> dict:
-    """Run full experiment pipeline."""
+    """Run full experiment pipeline, supporting single or multiple tickers."""
     data_cfg = config["data"]
     model_cfg = config["model"]
     train_cfg = config["training"]
     eval_cfg = config["evaluation"]
 
-    # 1. Fetch data
-    logger.info(f"Fetching data for {data_cfg['ticker']}...")
-    df = fetch_ohlcv(
-        ticker=data_cfg["ticker"],
-        interval=data_cfg.get("interval", "1d"),
-        period=data_cfg.get("period", "5y"),
-    )
+    # Support both single ticker and list of tickers
+    tickers = data_cfg.get("tickers", [data_cfg.get("ticker", "AAPL")])
+    if isinstance(tickers, str):
+        tickers = [tickers]
 
-    # 2. Compute indicators
-    logger.info("Computing technical indicators...")
-    features_df = compute_all_indicators(df)
+    all_ticker_results = {}
 
-    # 3. Target: next-day log return
-    target = compute_returns(df).shift(-1)  # predict next day's return
-    target.name = "target"
+    for ticker in tickers:
+        logger.info(f"\n{'#'*60}")
+        logger.info(f"Processing ticker: {ticker}")
+        logger.info(f"{'#'*60}")
 
-    # 4. Align and drop NaN
-    combined = pd.concat([features_df, target], axis=1).dropna()
-    feature_cols = [c for c in combined.columns if c != "target"]
+        # Prepare data with full preprocessing pipeline
+        features_df, ohlcv_df, data_report = prepare_ticker_data(ticker, data_cfg)
 
-    features = combined[feature_cols].values
-    targets = combined["target"].values
+        # Target: next-period log return
+        target = compute_returns(ohlcv_df).shift(-1)
+        target.name = "target"
 
-    logger.info(f"Dataset: {len(combined)} samples, {len(feature_cols)} features")
-    logger.info(f"Features: {feature_cols}")
+        # Align and drop NaN
+        combined = pd.concat([features_df, target], axis=1).dropna()
+        feature_cols = [c for c in combined.columns if c != "target"]
 
-    # 5. Run walk-forward for each model type
-    results = {}
-    for mtype in model_cfg["types"]:
-        logger.info(f"\n{'='*60}")
-        logger.info(f"Running walk-forward validation for {mtype.upper()}")
-        logger.info(f"{'='*60}")
+        features = combined[feature_cols].values
+        targets = combined["target"].values
 
-        mkwargs = model_cfg.get(mtype, {})
-        mkwargs["input_size"] = len(feature_cols)  # will be overridden by build_model
+        # Compute feature statistics for reporting
+        feature_stats = compute_feature_stats(combined[feature_cols])
 
-        result = walk_forward_validation(
-            features=features,
-            targets=targets,
-            model_type=mtype,
-            model_kwargs={k: v for k, v in mkwargs.items() if k != "input_size"},
-            seq_len=train_cfg.get("seq_len", 30),
-            train_size=eval_cfg.get("train_size", 500),
-            test_size=eval_cfg.get("test_size", 60),
-            step_size=eval_cfg.get("step_size", 60),
-            epochs=train_cfg.get("epochs", 50),
-            batch_size=train_cfg.get("batch_size", 32),
-            lr=train_cfg.get("lr", 1e-3),
-            cost_bps=eval_cfg.get("cost_bps", 10.0),
-        )
-        results[mtype] = result
+        logger.info(f"Dataset: {len(combined)} samples, {len(feature_cols)} features")
+        logger.info(f"Features: {feature_cols}")
+
+        # Run walk-forward for each model type
+        model_results = {}
+        for mtype in model_cfg["types"]:
+            logger.info(f"\n{'='*60}")
+            logger.info(f"Running walk-forward validation for {mtype.upper()} on {ticker}")
+            logger.info(f"{'='*60}")
+
+            mkwargs = model_cfg.get(mtype, {})
+            mkwargs["input_size"] = len(feature_cols)
+
+            result = walk_forward_validation(
+                features=features,
+                targets=targets,
+                model_type=mtype,
+                model_kwargs={k: v for k, v in mkwargs.items() if k != "input_size"},
+                seq_len=train_cfg.get("seq_len", 30),
+                train_size=eval_cfg.get("train_size", 500),
+                test_size=eval_cfg.get("test_size", 60),
+                step_size=eval_cfg.get("step_size", 60),
+                epochs=train_cfg.get("epochs", 50),
+                batch_size=train_cfg.get("batch_size", 32),
+                lr=train_cfg.get("lr", 1e-3),
+                cost_bps=eval_cfg.get("cost_bps", 10.0),
+            )
+            model_results[mtype] = result
+
+        all_ticker_results[ticker] = {
+            "n_samples": len(combined),
+            "n_features": len(feature_cols),
+            "feature_names": feature_cols,
+            "data_report": data_report,
+            "feature_stats": feature_stats,
+            "results": model_results,
+        }
 
     return {
         "config": config,
-        "ticker": data_cfg["ticker"],
-        "n_samples": len(combined),
-        "n_features": len(feature_cols),
-        "feature_names": feature_cols,
-        "results": results,
+        "tickers": tickers,
+        "ticker_results": all_ticker_results,
     }
 
 
-def save_results(experiment: dict, output_dir: str = "reports/cycle_1"):
-    """Save experiment results."""
+def save_results(experiment: dict, output_dir: str = "reports/cycle_2"):
+    """Save experiment results for all tickers."""
     out = Path(output_dir)
     out.mkdir(parents=True, exist_ok=True)
 
-    # Metrics JSON
     metrics = {
-        "ticker": experiment["ticker"],
-        "n_samples": experiment["n_samples"],
-        "n_features": experiment["n_features"],
-        "models": {},
+        "tickers": experiment["tickers"],
+        "per_ticker": {},
     }
-    for model_name, result in experiment["results"].items():
-        if "error" in result:
-            metrics["models"][model_name] = {"error": result["error"]}
-            continue
-        metrics["models"][model_name] = {
-            "aggregate": result["aggregate"],
-            "baseline_buy_hold": result["baseline_buy_hold"],
-            "stability_ratio": result["stability_ratio"],
-            "n_windows": result["n_windows"],
-            "positive_windows": result["positive_windows"],
+
+    for ticker, ticker_data in experiment["ticker_results"].items():
+        ticker_metrics = {
+            "n_samples": ticker_data["n_samples"],
+            "n_features": ticker_data["n_features"],
+            "data_summary": ticker_data["data_report"]["summary"],
+            "models": {},
         }
+        for model_name, result in ticker_data["results"].items():
+            if "error" in result:
+                ticker_metrics["models"][model_name] = {"error": result["error"]}
+                continue
+            ticker_metrics["models"][model_name] = {
+                "aggregate": result["aggregate"],
+                "baseline_buy_hold": result["baseline_buy_hold"],
+                "stability_ratio": result["stability_ratio"],
+                "n_windows": result["n_windows"],
+                "positive_windows": result["positive_windows"],
+            }
+        metrics["per_ticker"][ticker] = ticker_metrics
 
     with open(out / "metrics.json", "w") as f:
         json.dump(metrics, f, indent=2)
@@ -128,30 +190,38 @@ def main():
     parser = argparse.ArgumentParser(description="Run price prediction experiment")
     parser.add_argument("command", choices=["run-experiment"])
     parser.add_argument("--config", required=True, help="Path to config YAML")
+    parser.add_argument("--output-dir", default=None, help="Output directory for results")
     args = parser.parse_args()
 
     config = load_config(args.config)
     experiment = run_experiment(config)
-    save_results(experiment)
+
+    output_dir = args.output_dir or "reports/cycle_2"
+    save_results(experiment, output_dir=output_dir)
 
     # Print summary
-    print("\n" + "=" * 60)
+    print("\n" + "=" * 70)
     print("EXPERIMENT SUMMARY")
-    print("=" * 60)
-    for model_name, result in experiment["results"].items():
-        if "error" in result:
-            print(f"\n{model_name.upper()}: {result['error']}")
-            continue
-        agg = result["aggregate"]
-        bl = result["baseline_buy_hold"]
-        print(f"\n{model_name.upper()}:")
-        print(f"  Sharpe Ratio (net):  {agg['sharpe_ratio']:.4f}")
-        print(f"  Total Return (net):  {agg['total_return']:.4f}")
-        print(f"  Max Drawdown:        {agg['max_drawdown']:.4f}")
-        print(f"  Win Rate:            {agg['win_rate']:.4f}")
-        print(f"  Stability:           {result['stability_ratio']:.4f}")
-        print(f"  Baseline Sharpe:     {bl['sharpe_ratio']:.4f}")
-        print(f"  Baseline Return:     {bl['total_return']:.4f}")
+    print("=" * 70)
+    for ticker, ticker_data in experiment["ticker_results"].items():
+        print(f"\n{'─'*70}")
+        print(f"Ticker: {ticker} ({ticker_data['n_samples']} samples, "
+              f"{ticker_data['n_features']} features)")
+        print(f"{'─'*70}")
+        for model_name, result in ticker_data["results"].items():
+            if "error" in result:
+                print(f"\n  {model_name.upper()}: {result['error']}")
+                continue
+            agg = result["aggregate"]
+            bl = result["baseline_buy_hold"]
+            print(f"\n  {model_name.upper()}:")
+            print(f"    Sharpe Ratio (net):  {agg['sharpe_ratio']:.4f}")
+            print(f"    Total Return (net):  {agg['total_return']:.4f}")
+            print(f"    Max Drawdown:        {agg['max_drawdown']:.4f}")
+            print(f"    Win Rate:            {agg['win_rate']:.4f}")
+            print(f"    Stability:           {result['stability_ratio']:.4f}")
+            print(f"    Baseline Sharpe:     {bl['sharpe_ratio']:.4f}")
+            print(f"    Baseline Return:     {bl['total_return']:.4f}")
 
 
 if __name__ == "__main__":
