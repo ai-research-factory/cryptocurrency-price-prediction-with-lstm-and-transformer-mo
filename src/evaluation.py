@@ -2,6 +2,9 @@
 
 Cycle 3: Enhanced with purged walk-forward, interval-aware annualization,
 Sortino/Calmar ratios, cost sensitivity analysis, and significance testing.
+
+Cycle 4: Added minimum holding period, feature importance analysis,
+and ensemble prediction support.
 """
 
 import logging
@@ -31,21 +34,44 @@ def get_annualization_factor(interval: str = "1d") -> int:
     return ANNUALIZATION_FACTORS.get(interval, 252)
 
 
+def _apply_min_holding_period(position: np.ndarray, min_hold: int) -> np.ndarray:
+    """Enforce minimum holding period on position changes.
+
+    Once a position change occurs, the new position is held for at least
+    min_hold periods before another change is allowed. This reduces
+    unnecessary trade churn from noisy predictions.
+    """
+    if min_hold <= 1:
+        return position
+    result = position.copy()
+    hold_counter = 0
+    for i in range(1, len(result)):
+        if hold_counter > 0:
+            result[i] = result[i - 1]
+            hold_counter -= 1
+        elif result[i] != result[i - 1]:
+            hold_counter = min_hold - 1
+    return result
+
+
 def compute_trading_metrics(
     predictions: np.ndarray,
     actual_returns: np.ndarray,
     cost_bps: float = 10.0,
     interval: str = "1d",
+    min_holding_period: int = 1,
 ) -> dict:
     """Compute trading metrics from predicted vs actual returns.
 
     Strategy: go long when predicted return > 0, else flat.
+    Cycle 4: Added min_holding_period to reduce trade frequency.
     """
     ann_factor = get_annualization_factor(interval)
     cost = cost_bps / 10_000
 
     # Position: 1 if predicted return > 0, else 0
     position = (predictions > 0).astype(float)
+    position = _apply_min_holding_period(position, min_holding_period)
     trades = np.abs(np.diff(position, prepend=0))
 
     # Strategy returns
@@ -166,11 +192,14 @@ def cost_sensitivity_analysis(
     actual_returns: np.ndarray,
     cost_levels_bps: list[float],
     interval: str = "1d",
+    min_holding_period: int = 1,
 ) -> list[dict]:
     """Evaluate strategy at multiple transaction cost levels."""
     results = []
     for cost_bps in cost_levels_bps:
-        metrics = compute_trading_metrics(predictions, actual_returns, cost_bps, interval)
+        metrics = compute_trading_metrics(
+            predictions, actual_returns, cost_bps, interval, min_holding_period
+        )
         results.append({
             "cost_bps": cost_bps,
             "sharpe_ratio": metrics["sharpe_ratio"],
@@ -179,6 +208,96 @@ def cost_sensitivity_analysis(
             "sortino_ratio": metrics["sortino_ratio"],
         })
     return results
+
+
+def compute_feature_importance(
+    features: np.ndarray,
+    targets: np.ndarray,
+    model_type: str,
+    model_kwargs: dict,
+    feature_names: list[str],
+    seq_len: int = 30,
+    train_size: int = 500,
+    epochs: int = 50,
+    batch_size: int = 32,
+    lr: float = 1e-3,
+    cost_bps: float = 10.0,
+    interval: str = "1d",
+    device: str = "cpu",
+    n_repeats: int = 3,
+) -> dict:
+    """Compute permutation feature importance.
+
+    Trains a model once, then measures Sharpe degradation when each feature
+    is shuffled. Higher degradation = more important feature.
+    """
+    n = len(features)
+    if n < train_size + seq_len + 30:
+        return {"error": "Not enough data for feature importance"}
+
+    # Use last portion as test
+    test_size = min(n - train_size - seq_len, 200)
+
+    train_features = features[:train_size]
+    train_targets = targets[:train_size]
+    test_features = features[train_size:train_size + test_size]
+    test_targets = targets[train_size:train_size + test_size]
+
+    window_features = np.vstack([train_features, test_features])
+    window_targets = np.concatenate([train_targets, test_targets])
+
+    train_ds, test_ds, scaler_stats, _ = prepare_data(
+        window_features, window_targets, train_size, seq_len
+    )
+
+    if len(test_ds) == 0:
+        return {"error": "Empty test set"}
+
+    model = build_model(model_type, features.shape[1], **model_kwargs)
+    train_model(model, train_ds, epochs=epochs, batch_size=batch_size, lr=lr, device=device)
+
+    # Baseline predictions
+    base_preds = predict(model, test_ds, device=device)
+    actuals = window_targets[train_size + seq_len: train_size + seq_len + len(base_preds)]
+    base_metrics = compute_trading_metrics(base_preds, actuals, cost_bps, interval)
+    base_sharpe = base_metrics["sharpe_ratio"]
+
+    # Permute each feature and measure degradation
+    importances = {}
+    for feat_idx, feat_name in enumerate(feature_names):
+        sharpe_drops = []
+        for _ in range(n_repeats):
+            permuted_features = window_features.copy()
+            # Shuffle only the test portion of this feature
+            rng = np.random.RandomState()
+            perm_idx = rng.permutation(test_size)
+            permuted_features[train_size:train_size + test_size, feat_idx] = \
+                permuted_features[train_size + perm_idx, feat_idx]
+
+            # Re-scale with same stats
+            test_scaled = (permuted_features[train_size:] - scaler_stats["mean"]) / scaler_stats["std"]
+            from .training import TimeSeriesDataset
+            perm_ds = TimeSeriesDataset(
+                test_scaled, window_targets[train_size:], seq_len
+            )
+            perm_preds = predict(model, perm_ds, device=device)
+            perm_actuals = window_targets[train_size + seq_len: train_size + seq_len + len(perm_preds)]
+            perm_metrics = compute_trading_metrics(perm_preds, perm_actuals, cost_bps, interval)
+            sharpe_drops.append(base_sharpe - perm_metrics["sharpe_ratio"])
+
+        importances[feat_name] = {
+            "mean_sharpe_drop": float(np.mean(sharpe_drops)),
+            "std_sharpe_drop": float(np.std(sharpe_drops)),
+        }
+
+    # Sort by importance (highest drop = most important)
+    sorted_features = sorted(importances.keys(), key=lambda f: importances[f]["mean_sharpe_drop"], reverse=True)
+
+    return {
+        "base_sharpe": float(base_sharpe),
+        "feature_importances": importances,
+        "ranking": sorted_features,
+    }
 
 
 def _compute_adaptive_window_sizes(
@@ -229,6 +348,7 @@ def walk_forward_validation(
     interval: str = "1d",
     adaptive_window: bool = False,
     cost_sensitivity_levels: Optional[list[float]] = None,
+    min_holding_period: int = 1,
 ) -> dict:
     """Run purged walk-forward validation.
 
@@ -285,7 +405,7 @@ def walk_forward_validation(
         actuals = window_targets[train_size + seq_len : train_size + seq_len + len(preds)]
 
         # Window-level metrics
-        w_metrics = compute_trading_metrics(preds, actuals, cost_bps, interval)
+        w_metrics = compute_trading_metrics(preds, actuals, cost_bps, interval, min_holding_period)
         w_metrics["window"] = window_idx
         window_metrics.append(w_metrics)
 
@@ -308,11 +428,12 @@ def walk_forward_validation(
     all_actuals = np.array(all_actuals)
 
     # Aggregate metrics
-    agg_metrics = compute_trading_metrics(all_preds, all_actuals, cost_bps, interval)
+    agg_metrics = compute_trading_metrics(all_preds, all_actuals, cost_bps, interval, min_holding_period)
     baseline_metrics = compute_naive_baseline(all_actuals, cost_bps, interval)
 
     # Strategy vs baseline significance test
     position = (all_preds > 0).astype(float)
+    position = _apply_min_holding_period(position, min_holding_period)
     cost = cost_bps / 10_000
     trades = np.abs(np.diff(position, prepend=0))
     strategy_returns = position * all_actuals - trades * cost
@@ -335,7 +456,7 @@ def walk_forward_validation(
     cost_sensitivity = None
     if cost_sensitivity_levels:
         cost_sensitivity = cost_sensitivity_analysis(
-            all_preds, all_actuals, cost_sensitivity_levels, interval
+            all_preds, all_actuals, cost_sensitivity_levels, interval, min_holding_period
         )
 
     result = {
@@ -348,6 +469,8 @@ def walk_forward_validation(
         "positive_windows": positive_windows,
         "window_sharpe_stats": sharpe_stats,
         "window_details": window_metrics,
+        "all_predictions": all_preds.tolist(),
+        "all_actuals": all_actuals.tolist(),
         "walk_forward_config": {
             "train_size": train_size,
             "test_size": test_size,
@@ -356,6 +479,7 @@ def walk_forward_validation(
             "adaptive_window": adaptive_window,
             "interval": interval,
             "annualization_factor": get_annualization_factor(interval),
+            "min_holding_period": min_holding_period,
         },
     }
     if cost_sensitivity is not None:

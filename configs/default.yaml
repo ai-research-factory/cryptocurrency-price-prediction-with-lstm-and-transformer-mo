@@ -1,10 +1,13 @@
 data:
-  tickers: ["BTC/USDT", "AAPL"]
+  tickers: ["BTC/USDT", "ETH/USDT", "AAPL"]
   interval: "1d"
   period: "5y"
   # Per-ticker overrides for interval/period
   ticker_overrides:
     "BTC/USDT":
+      interval: "1h"
+      period: "1y"
+    "ETH/USDT":
       interval: "1h"
       period: "1y"
 
@@ -38,3 +41,9 @@ evaluation:
   adaptive_window: true
   # Cycle 3: cost sensitivity analysis at multiple levels (basis points)
   cost_sensitivity_bps: [0.0, 2.0, 5.0, 10.0, 20.0, 50.0]
+  # Cycle 4: minimum holding period to reduce trade churn (periods)
+  min_holding_period: 3
+  # Cycle 4: feature importance analysis (permutation-based)
+  feature_importance: true
+  # Cycle 4: ensemble averaging of LSTM + Transformer predictions
+  ensemble: true

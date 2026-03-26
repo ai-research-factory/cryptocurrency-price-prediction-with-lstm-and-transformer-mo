@@ -1,4 +1,7 @@
-"""CLI entry point for running experiments."""
+"""CLI entry point for running experiments.
+
+Cycle 4: Added ensemble model, feature importance, min holding period, ETH/USDT.
+"""
 
 import argparse
 import json
@@ -13,7 +16,7 @@ import yaml
 from .data import fetch_ohlcv, compute_returns, validate_ohlcv, clean_ohlcv, compute_data_summary
 from .indicators import compute_all_indicators
 from .preprocessing import preprocess_features, compute_feature_stats
-from .evaluation import walk_forward_validation
+from .evaluation import walk_forward_validation, compute_feature_importance, compute_trading_metrics, compute_naive_baseline, compute_significance_vs_baseline, cost_sensitivity_analysis, _apply_min_holding_period
 
 logging.basicConfig(
     level=logging.INFO,
@@ -62,8 +65,73 @@ def prepare_ticker_data(ticker: str, data_cfg: dict) -> tuple[pd.DataFrame, pd.D
     return features_df, df, data_report
 
 
+def _build_ensemble_result(
+    model_results: dict,
+    features: np.ndarray,
+    targets: np.ndarray,
+    eval_cfg: dict,
+    interval: str,
+    cost_sensitivity_levels: list[float] | None,
+    min_holding_period: int,
+) -> dict | None:
+    """Build ensemble result by averaging predictions from all models.
+
+    Requires that all individual models stored their per-window predictions.
+    Falls back to averaging aggregate predictions if available.
+    """
+    # Collect all_preds and all_actuals from each model's window_details
+    model_all_preds = {}
+    for mtype, result in model_results.items():
+        if "error" in result or "all_predictions" not in result:
+            continue
+        model_all_preds[mtype] = np.array(result["all_predictions"])
+
+    if len(model_all_preds) < 2:
+        return None
+
+    # All models should have same length predictions
+    lengths = [len(p) for p in model_all_preds.values()]
+    if len(set(lengths)) != 1:
+        logger.warning("Model prediction lengths differ, cannot ensemble")
+        return None
+
+    # Average predictions
+    pred_arrays = list(model_all_preds.values())
+    ensemble_preds = np.mean(pred_arrays, axis=0)
+    all_actuals = np.array(model_results[list(model_all_preds.keys())[0]]["all_actuals"])
+
+    from .evaluation import get_annualization_factor
+    cost_bps = eval_cfg.get("cost_bps", 10.0)
+
+    agg_metrics = compute_trading_metrics(ensemble_preds, all_actuals, cost_bps, interval, min_holding_period)
+    baseline_metrics = compute_naive_baseline(all_actuals, cost_bps, interval)
+
+    # Significance test
+    position = (ensemble_preds > 0).astype(float)
+    position = _apply_min_holding_period(position, min_holding_period)
+    cost = cost_bps / 10_000
+    trades = np.abs(np.diff(position, prepend=0))
+    strategy_returns = position * all_actuals - trades * cost
+    significance = compute_significance_vs_baseline(strategy_returns, all_actuals)
+
+    result = {
+        "model_type": "ensemble",
+        "aggregate": agg_metrics,
+        "baseline_buy_hold": baseline_metrics,
+        "significance_vs_baseline": significance,
+        "component_models": list(model_all_preds.keys()),
+    }
+
+    if cost_sensitivity_levels:
+        result["cost_sensitivity"] = cost_sensitivity_analysis(
+            ensemble_preds, all_actuals, cost_sensitivity_levels, interval, min_holding_period
+        )
+
+    return result
+
+
 def run_experiment(config: dict) -> dict:
-    """Run full experiment pipeline with Cycle 3 enhancements."""
+    """Run full experiment pipeline with Cycle 4 enhancements."""
     data_cfg = config["data"]
     model_cfg = config["model"]
     train_cfg = config["training"]
@@ -77,6 +145,10 @@ def run_experiment(config: dict) -> dict:
     cost_sensitivity_levels = eval_cfg.get("cost_sensitivity_bps", None)
     purge_gap = eval_cfg.get("purge_gap", 0)
     adaptive_window = eval_cfg.get("adaptive_window", False)
+    # Cycle 4: minimum holding period
+    min_holding_period = eval_cfg.get("min_holding_period", 1)
+    run_feature_importance = eval_cfg.get("feature_importance", False)
+    run_ensemble = eval_cfg.get("ensemble", True)
 
     all_ticker_results = {}
 
@@ -105,7 +177,8 @@ def run_experiment(config: dict) -> dict:
         logger.info(f"Dataset: {len(combined)} samples, {len(feature_cols)} features")
         logger.info(f"Features: {feature_cols}")
         logger.info(f"Interval: {interval}, Purge gap: {purge_gap}, "
-                     f"Adaptive window: {adaptive_window}")
+                     f"Adaptive window: {adaptive_window}, "
+                     f"Min holding period: {min_holding_period}")
 
         model_results = {}
         for mtype in model_cfg["types"]:
@@ -133,8 +206,50 @@ def run_experiment(config: dict) -> dict:
                 interval=interval,
                 adaptive_window=adaptive_window,
                 cost_sensitivity_levels=cost_sensitivity_levels,
+                min_holding_period=min_holding_period,
             )
             model_results[mtype] = result
+
+        # Cycle 4: Ensemble model (average of all model predictions)
+        if run_ensemble and len(model_cfg["types"]) >= 2:
+            logger.info(f"\n{'='*60}")
+            logger.info(f"Building ENSEMBLE model for {ticker}")
+            logger.info(f"{'='*60}")
+            ensemble_result = _build_ensemble_result(
+                model_results, features, targets, eval_cfg, interval,
+                cost_sensitivity_levels, min_holding_period,
+            )
+            if ensemble_result is not None:
+                model_results["ensemble"] = ensemble_result
+                logger.info(f"Ensemble Sharpe: {ensemble_result['aggregate']['sharpe_ratio']:.4f}")
+            else:
+                logger.warning("Could not build ensemble — insufficient predictions")
+
+        # Cycle 4: Feature importance analysis
+        feat_importance = {}
+        if run_feature_importance:
+            for mtype in model_cfg["types"]:
+                logger.info(f"\n{'='*60}")
+                logger.info(f"Computing feature importance for {mtype.upper()} on {ticker}")
+                logger.info(f"{'='*60}")
+                mkwargs = model_cfg.get(mtype, {})
+                fi = compute_feature_importance(
+                    features=features,
+                    targets=targets,
+                    model_type=mtype,
+                    model_kwargs={k: v for k, v in mkwargs.items() if k != "input_size"},
+                    feature_names=feature_cols,
+                    seq_len=train_cfg.get("seq_len", 30),
+                    train_size=eval_cfg.get("train_size", 500),
+                    epochs=train_cfg.get("epochs", 50),
+                    batch_size=train_cfg.get("batch_size", 32),
+                    lr=train_cfg.get("lr", 1e-3),
+                    cost_bps=eval_cfg.get("cost_bps", 10.0),
+                    interval=interval,
+                )
+                feat_importance[mtype] = fi
+                if "ranking" in fi:
+                    logger.info(f"Feature ranking ({mtype}): {fi['ranking']}")
 
         all_ticker_results[ticker] = {
             "n_samples": len(combined),
@@ -144,6 +259,7 @@ def run_experiment(config: dict) -> dict:
             "feature_stats": feature_stats,
             "interval": interval,
             "results": model_results,
+            "feature_importance": feat_importance if feat_importance else None,
         }
 
     return {
@@ -153,7 +269,7 @@ def run_experiment(config: dict) -> dict:
     }
 
 
-def save_results(experiment: dict, output_dir: str = "reports/cycle_3"):
+def save_results(experiment: dict, output_dir: str = "reports/cycle_4"):
     """Save experiment results for all tickers."""
     out = Path(output_dir)
     out.mkdir(parents=True, exist_ok=True)
@@ -177,17 +293,26 @@ def save_results(experiment: dict, output_dir: str = "reports/cycle_3"):
                 continue
             model_metrics = {
                 "aggregate": result["aggregate"],
-                "baseline_buy_hold": result["baseline_buy_hold"],
+                "baseline_buy_hold": result.get("baseline_buy_hold", {}),
                 "significance_vs_baseline": result.get("significance_vs_baseline", {}),
-                "stability_ratio": result["stability_ratio"],
-                "n_windows": result["n_windows"],
-                "positive_windows": result["positive_windows"],
-                "window_sharpe_stats": result.get("window_sharpe_stats", {}),
-                "walk_forward_config": result.get("walk_forward_config", {}),
             }
+            # Fields present in walk-forward results but not ensemble
+            if "stability_ratio" in result:
+                model_metrics["stability_ratio"] = result["stability_ratio"]
+                model_metrics["n_windows"] = result["n_windows"]
+                model_metrics["positive_windows"] = result["positive_windows"]
+                model_metrics["window_sharpe_stats"] = result.get("window_sharpe_stats", {})
+                model_metrics["walk_forward_config"] = result.get("walk_forward_config", {})
+            if "component_models" in result:
+                model_metrics["component_models"] = result["component_models"]
             if "cost_sensitivity" in result:
                 model_metrics["cost_sensitivity"] = result["cost_sensitivity"]
             ticker_metrics["models"][model_name] = model_metrics
+
+        # Cycle 4: Feature importance
+        if ticker_data.get("feature_importance"):
+            ticker_metrics["feature_importance"] = ticker_data["feature_importance"]
+
         metrics["per_ticker"][ticker] = ticker_metrics
 
     with open(out / "metrics.json", "w") as f:
@@ -205,12 +330,12 @@ def main():
     config = load_config(args.config)
     experiment = run_experiment(config)
 
-    output_dir = args.output_dir or "reports/cycle_3"
+    output_dir = args.output_dir or "reports/cycle_4"
     save_results(experiment, output_dir=output_dir)
 
     # Print summary
     print("\n" + "=" * 70)
-    print("EXPERIMENT SUMMARY (Cycle 3)")
+    print("EXPERIMENT SUMMARY (Cycle 4)")
     print("=" * 70)
     for ticker, ticker_data in experiment["ticker_results"].items():
         print(f"\n{'─'*70}")
@@ -222,20 +347,26 @@ def main():
                 print(f"\n  {model_name.upper()}: {result['error']}")
                 continue
             agg = result["aggregate"]
-            bl = result["baseline_buy_hold"]
+            bl = result.get("baseline_buy_hold", {})
             sig = result.get("significance_vs_baseline", {})
             wf = result.get("walk_forward_config", {})
-            print(f"\n  {model_name.upper()} (windows={result['n_windows']}, "
-                  f"train={wf.get('train_size','?')}, test={wf.get('test_size','?')}, "
-                  f"purge={wf.get('purge_gap',0)}):")
-            print(f"    Sharpe (net):     {agg['sharpe_ratio']:.4f}  (baseline: {bl['sharpe_ratio']:.4f})")
-            print(f"    Sortino (net):    {agg['sortino_ratio']:.4f}  (baseline: {bl['sortino_ratio']:.4f})")
-            print(f"    Total Return:     {agg['total_return']:.4f}  (baseline: {bl['total_return']:.4f})")
-            print(f"    Max Drawdown:     {agg['max_drawdown']:.4f}  (baseline: {bl['max_drawdown']:.4f})")
-            print(f"    Calmar:           {agg['calmar_ratio']:.4f}  (baseline: {bl['calmar_ratio']:.4f})")
+            n_win = result.get('n_windows', '-')
+            if wf:
+                print(f"\n  {model_name.upper()} (windows={n_win}, "
+                      f"train={wf.get('train_size','?')}, test={wf.get('test_size','?')}, "
+                      f"purge={wf.get('purge_gap',0)}, min_hold={wf.get('min_holding_period',1)}):")
+            else:
+                components = result.get("component_models", [])
+                print(f"\n  {model_name.upper()} (components: {', '.join(components)}):")
+            print(f"    Sharpe (net):     {agg['sharpe_ratio']:.4f}  (baseline: {bl.get('sharpe_ratio', 0):.4f})")
+            print(f"    Sortino (net):    {agg['sortino_ratio']:.4f}  (baseline: {bl.get('sortino_ratio', 0):.4f})")
+            print(f"    Total Return:     {agg['total_return']:.4f}  (baseline: {bl.get('total_return', 0):.4f})")
+            print(f"    Max Drawdown:     {agg['max_drawdown']:.4f}  (baseline: {bl.get('max_drawdown', 0):.4f})")
+            print(f"    Calmar:           {agg['calmar_ratio']:.4f}  (baseline: {bl.get('calmar_ratio', 0):.4f})")
             print(f"    Win Rate:         {agg['win_rate']:.4f}")
             print(f"    Total Cost:       {agg['total_cost']:.6f}")
-            print(f"    Stability:        {result['stability_ratio']:.4f}")
+            if "stability_ratio" in result:
+                print(f"    Stability:        {result['stability_ratio']:.4f}")
             if sig:
                 print(f"    Significance:     p={sig.get('p_value', 'N/A'):.4f} "
                       f"({'significant' if sig.get('significant_5pct') else 'not significant'} at 5%)")
@@ -244,6 +375,13 @@ def main():
                 for cs in result["cost_sensitivity"]:
                     print(f"      {cs['cost_bps']:5.1f} bps → Sharpe={cs['sharpe_ratio']:.4f}, "
                           f"Return={cs['total_return']:.4f}")
+
+        # Print feature importance if available
+        if ticker_data.get("feature_importance"):
+            print(f"\n  Feature Importance:")
+            for mtype, fi in ticker_data["feature_importance"].items():
+                if "ranking" in fi:
+                    print(f"    {mtype.upper()} ranking: {', '.join(fi['ranking'][:5])} (top 5)")
 
 
 if __name__ == "__main__":

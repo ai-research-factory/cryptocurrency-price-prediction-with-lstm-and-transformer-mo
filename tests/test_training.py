@@ -48,3 +48,30 @@ def test_train_and_predict():
 
     preds = predict(model, test_ds)
     assert len(preds) == len(test_ds)
+
+
+def test_train_with_lr_scheduler():
+    """Cycle 4: Verify training works with LR scheduler enabled."""
+    np.random.seed(42)
+    features = np.random.randn(200, 5)
+    targets = np.random.randn(200)
+
+    train_ds, _, _, _ = prepare_data(features, targets, train_end=150, seq_len=10)
+    model = build_model("lstm", input_size=5, hidden_size=16, num_layers=1)
+
+    losses = train_model(model, train_ds, epochs=10, batch_size=16, use_lr_scheduler=True)
+    assert len(losses) == 10
+    assert all(l > 0 for l in losses)
+
+
+def test_train_without_lr_scheduler():
+    """Cycle 4: Verify training works with LR scheduler disabled."""
+    np.random.seed(42)
+    features = np.random.randn(200, 5)
+    targets = np.random.randn(200)
+
+    train_ds, _, _, _ = prepare_data(features, targets, train_end=150, seq_len=10)
+    model = build_model("lstm", input_size=5, hidden_size=16, num_layers=1)
+
+    losses = train_model(model, train_ds, epochs=5, batch_size=16, use_lr_scheduler=False)
+    assert len(losses) == 5

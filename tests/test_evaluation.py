@@ -1,4 +1,4 @@
-"""Tests for evaluation metrics (Cycle 3 enhanced)."""
+"""Tests for evaluation metrics (Cycle 4 enhanced)."""
 
 import numpy as np
 import pytest
@@ -10,6 +10,7 @@ from src.evaluation import (
     cost_sensitivity_analysis,
     get_annualization_factor,
     _compute_adaptive_window_sizes,
+    _apply_min_holding_period,
 )
 
 
@@ -134,3 +135,43 @@ def test_adaptive_window_small_dataset():
     train, test, step = _compute_adaptive_window_sizes(n_samples=300, seq_len=30)
     assert train >= 200
     assert test >= 30
+
+
+# Cycle 4 tests
+
+def test_min_holding_period_basic():
+    """Min holding period should prevent rapid position changes."""
+    position = np.array([0, 1, 0, 1, 0, 1, 0, 1, 0, 1], dtype=float)
+    result = _apply_min_holding_period(position, min_hold=3)
+    # After switching to 1 at index 1, must hold for 3 periods
+    assert result[1] == 1.0
+    assert result[2] == 1.0  # held
+    assert result[3] == 1.0  # held
+
+
+def test_min_holding_period_reduces_trades():
+    """Min holding period should reduce number of trades."""
+    preds_noisy = np.array([0.01, -0.01, 0.01, -0.01, 0.01, -0.01, 0.01, -0.01] * 10)
+    actuals = np.ones(80) * 0.001
+    m_no_hold = compute_trading_metrics(preds_noisy, actuals, cost_bps=10, min_holding_period=1)
+    m_with_hold = compute_trading_metrics(preds_noisy, actuals, cost_bps=10, min_holding_period=5)
+    assert m_with_hold["n_trades"] < m_no_hold["n_trades"]
+    assert m_with_hold["total_cost"] < m_no_hold["total_cost"]
+
+
+def test_min_holding_period_1_is_noop():
+    """Min holding period of 1 should not change anything."""
+    position = np.array([0, 1, 0, 1, 0, 1], dtype=float)
+    result = _apply_min_holding_period(position, min_hold=1)
+    np.testing.assert_array_equal(position, result)
+
+
+def test_cost_sensitivity_with_min_hold():
+    """Cost sensitivity analysis should respect min holding period."""
+    preds = np.array([0.01, -0.01, 0.01, -0.01, 0.01] * 20)
+    actuals = np.ones(100) * 0.001
+    levels = [0.0, 10.0]
+    results_hold = cost_sensitivity_analysis(preds, actuals, levels, min_holding_period=5)
+    results_no_hold = cost_sensitivity_analysis(preds, actuals, levels, min_holding_period=1)
+    # With min hold, cost at 10 bps should be lower
+    assert results_hold[1]["total_cost"] <= results_no_hold[1]["total_cost"]

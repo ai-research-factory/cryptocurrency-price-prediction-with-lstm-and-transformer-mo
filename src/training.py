@@ -1,4 +1,7 @@
-"""Training and dataset utilities."""
+"""Training and dataset utilities.
+
+Cycle 4: Added learning rate scheduling (ReduceLROnPlateau).
+"""
 
 import logging
 
@@ -68,13 +71,23 @@ def train_model(
     batch_size: int = 32,
     lr: float = 1e-3,
     device: str = "cpu",
+    use_lr_scheduler: bool = True,
 ) -> list[float]:
-    """Train model and return loss history."""
+    """Train model and return loss history.
+
+    Cycle 4: Added ReduceLROnPlateau scheduler for better convergence.
+    """
     model = model.to(device)
     model.train()
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
     criterion = torch.nn.MSELoss()
     loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True)
+
+    scheduler = None
+    if use_lr_scheduler:
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer, mode="min", factor=0.5, patience=5, min_lr=1e-6,
+        )
 
     losses = []
     for epoch in range(epochs):
@@ -93,8 +106,13 @@ def train_model(
 
         avg_loss = epoch_loss / max(n_batches, 1)
         losses.append(avg_loss)
+
+        if scheduler is not None:
+            scheduler.step(avg_loss)
+
         if (epoch + 1) % 10 == 0:
-            logger.info(f"Epoch {epoch+1}/{epochs} - Loss: {avg_loss:.6f}")
+            current_lr = optimizer.param_groups[0]["lr"]
+            logger.info(f"Epoch {epoch+1}/{epochs} - Loss: {avg_loss:.6f} - LR: {current_lr:.2e}")
 
     return losses
 
