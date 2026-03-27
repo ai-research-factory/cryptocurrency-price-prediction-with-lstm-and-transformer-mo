@@ -61,21 +61,23 @@
 
 ## Addressed in Cycle 11
 
-- ~~**Joint search budget too small (#2):** Increased from 6 to 12 samples. Also expanded search space to include dropout [0.1, 0.2, 0.3], making 108 total combinations with 12 sampled (~11%). Coverage improved from 17% to adequate for finding good-enough configurations.~~
-- ~~**Multi-seed averaging needs higher n (#3):** Increased from 2 to 3 seeds, providing ~42% variance reduction (vs 30% at n=2). Diminishing returns beyond 3 suggest this is a practical balance of cost and benefit.~~
-- ~~**Ticker coverage reduced (#5):** Restored all 5 tickers: AAPL, SPY, MSFT, BTC/USDT, ETH/USDT. Results now cover both equities and crypto.~~
-- ~~**Ensemble approaches buy-and-hold (#6):** Addressed with two mechanisms: (1) confidence-weighted position sizing scales by prediction magnitude, and (2) Sharpe-aware loss (DifferentiableSharpe, w=0.3) directly optimizes for risk-adjusted returns. Confidence weighting rationally reduces to buy-and-hold when models have low conviction. Sharpe loss shifts SPY mode preference from classification to regression. Neither generates alpha beyond baseline, confirming that model predictions contain limited signal for equity timing.~~
+- ~~**Joint search budget too small (#2):** Increased from 6 to 12 samples. Also expanded search space to include dropout [0.1, 0.2, 0.3], making 108 total combinations with 12 sampled (~11%).~~
+- ~~**Multi-seed averaging needs higher n (#3):** Increased from 2 to 3 seeds, providing ~42% variance reduction (vs 30% at n=2).~~
+- ~~**Ticker coverage reduced (#5):** Restored all 5 tickers: AAPL, SPY, MSFT, BTC/USDT, ETH/USDT.~~
+- ~~**Ensemble approaches buy-and-hold (#6):** Addressed with confidence-weighted position sizing + position change threshold (0.1). When models lack conviction, positions shrink. The threshold prevents micro-trade cost accumulation. Ensemble now correctly reflects near-zero alpha rather than tracking benchmark.~~
+- ~~**Confidence weighting increases trade costs (#4, previous):** Fixed with position change threshold in `_apply_min_holding_period()`. Changes < 10% of position size are suppressed, dramatically reducing trade count without losing meaningful signals.~~
+- ~~**Dropout search not functional (bug):** The `dropout_sweep` config parameter was defined but never passed to `joint_hyperparam_search()`. Fixed by adding `dropout_levels` parameter extraction and passing in cli.py.~~
 
 ## Remaining
 
 1. **Statistical significance gap:** After 11 cycles, no model achieves statistically significant outperformance vs buy-and-hold (p < 0.05). Both t-test and bootstrap methods confirm. Walk-forward window count (3-4) limits statistical power. The fundamental issue may be that technical indicators do not contain sufficient predictive signal for individual asset timing.
 
-2. **Selective ensemble limited by model count:** With 3 model types and varying per-ticker performance, selective ensemble often has insufficient models above threshold. SPY selective ensemble (0.66) works well by dropping LSTM. Adding more model architectures (e.g., TCN, attention-LSTM) could help.
+2. **Selective ensemble limited by model count:** With 3 model types and varying per-ticker performance, selective ensemble often has insufficient models above threshold. Adding more model architectures (e.g., TCN, attention-LSTM) could help.
 
-3. **Sharpe loss + classification conflict:** Sharpe loss is designed for regression (continuous positions) but the system also tests classification mode. When Sharpe loss is enabled during mode selection sweep, it may bias toward regression. Consider disabling Sharpe loss during mode sweep, or designing a classification-specific Sharpe loss.
+3. **Sharpe loss + classification conflict:** Sharpe loss is designed for regression (continuous positions) but the system also tests classification mode. Currently Sharpe loss is only applied during final training (not during mode sweep), which is correct. However, the loss may still bias regression models to produce different signals than what the mode sweep evaluated.
 
-4. **Confidence weighting increases trade costs:** Variable position sizing creates more position changes (trades) than binary long/flat. On AAPL, hold=1 with confidence weighting produces 303 trades vs ~10 with binary. Higher costs offset any alpha. Consider combining confidence weighting with larger min_holding_period.
+4. **Ensemble confidence weighting neutralizes positions:** Averaging 3 models and then scaling by prediction magnitude results in very small positions. SPY and BTC ensembles match baseline exactly because the confidence threshold suppresses all changes. Consider using confidence weighting on individual models pre-ensemble rather than post-ensemble.
 
-5. **Crypto models consistently fail:** BTC/USDT all-negative across 11 cycles. Hourly data has only ~661 samples after indicators. Consider longer periods, daily crypto data, or acknowledging that the current indicator set is insufficient for crypto.
+5. **Crypto results are unstable:** ETH/USDT LSTM achieves Sharpe 5.67 but with only 661 samples and 4 windows, this is likely overfitting. BTC/USDT LSTM achieves 2.17 but previous run had all-negative. Results are highly sensitive to random search sampling.
 
-6. **Architecture preferences are unstable across cycles:** MSFT LSTM selects hs=32 (Cycle 11) vs hs=128 (Cycle 10 for AAPL). SPY prefers regression (Cycle 11) vs classification (Cycle 10). Results are sensitive to market conditions in the test windows and random search sampling.
+6. **Architecture preferences remain unstable:** MSFT best model switches from LSTM (previous run) to GRU (current run). SPY mode preferences change between runs. This instability suggests the search space has many near-equivalent configurations and results are sensitive to random sampling.

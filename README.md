@@ -145,29 +145,31 @@ reports/cycle_11/    -- Cycle 11 experiment results
 - **Per-model num_layers search:** Auto-selects optimal depth [1, 2, 3] per model/ticker (Cycle 9)
 - **Warmup-aware early stopping:** Early stopping skips warmup phase to let LR stabilize (Cycle 9)
 - **Multi-seed prediction averaging:** Averages predictions across N random seeds to reduce initialization variance (Cycle 10)
-- **Joint hyperparameter search:** Random search over (hidden_size, num_layers, seq_len) space replacing sequential sweeps (Cycle 10)
+- **Joint hyperparameter search:** Random search over (hidden_size, num_layers, seq_len, dropout) space replacing sequential sweeps (Cycle 10/11)
 - **Adaptive mode selection:** Auto-selects regression vs classification per model/ticker (Cycle 10)
 - **Confidence-weighted position sizing:** Scale positions by prediction magnitude instead of binary (Cycle 11)
+- **Position change threshold:** Suppresses micro-trades (< 10% position change) from confidence weighting (Cycle 11)
 - **Sharpe-aware loss:** Blended MSE + differentiable Sharpe ratio loss for regression models (Cycle 11)
-- **Dropout in joint search:** Adds regularization tuning to hyperparameter search space (Cycle 11)
+- **Dropout in joint search:** Adds regularization tuning [0.1, 0.2, 0.3] to hyperparameter search space (Cycle 11)
 
 ## Cycle 11 Results
 
-### Per-Ticker Best Models (5 tickers, n_seeds=3, joint_search=12, Sharpe loss, confidence-weighted)
+### Per-Ticker Best Models (5 tickers, n_seeds=3, joint_search=12, dropout search, Sharpe loss, confidence-weighted + position threshold)
 
 | Ticker   | Best Model          | Sharpe | Return  | Baseline | Stability |
 |----------|---------------------|--------|---------|----------|-----------|
-| AAPL     | Ensemble (equal)    | 0.44   | +24.2%  | 0.44     | --        |
-| SPY      | Sel. Ensemble       | 0.66   | +19.1%  | 1.12     | --        |
-| MSFT     | LSTM (reg)          | 0.61   | +23.2%  | 1.01     | 1.00      |
-| BTC/USDT | LSTM (reg)          | -3.09  | -1.3%   | 0.17     | 0.50      |
-| ETH/USDT | GRU (cls)           | 2.79   | +1.7%   | 0.82     | 0.50      |
+| AAPL     | Ensemble (inv-var)  | -0.00  | -0.2%   | 0.35     | --        |
+| SPY      | Ensemble (equal)    | 0.98   | +33.3%  | 0.98     | --        |
+| MSFT     | GRU (reg)           | 0.61   | +33.3%  | 1.01     | 1.00      |
+| BTC/USDT | LSTM (cls)          | 2.17   | +0.2%   | -0.76    | 0.75      |
+| ETH/USDT | LSTM (cls)          | 5.67   | +0.7%   | 0.46     | 0.50      |
 
 ### Key Findings (Cycle 11):
-- **Confidence weighting rationally converges to buy-and-hold**: When models lack conviction, position sizes shrink toward zero. AAPL ensemble exactly matches baseline (0.44).
-- **Sharpe-aware loss shifts mode preferences**: SPY selects regression for all models (Cycle 10: all classification). The Sharpe loss term rewards calibrated magnitude signals.
-- **MSFT LSTM achieves perfect stability**: HS=32, NL=3, SL=10 — small/deep/short architecture. 3/3 positive windows.
-- **Selective ensemble effective on SPY**: Dropping negative-Sharpe LSTM improves ensemble from 0.53 to 0.66.
-- **No statistical significance**: After 11 cycles, no model significantly outperforms buy-and-hold (p > 0.05), consistent with weak-form EMH.
+- **Fixed dropout search bug**: `dropout_sweep` config was defined but never passed to joint search. Now properly varies dropout [0.1, 0.2, 0.3] per model.
+- **Position change threshold reduces micro-trades**: Confidence-weighted positions now suppress changes < 10%, dramatically reducing trade costs from continuous position sizing.
+- **SPY ensemble matches baseline exactly**: With position threshold, confidence-weighted ensemble holds constant position, correctly reflecting no alpha.
+- **MSFT GRU achieves perfect stability**: HS=64, NL=3, SL=10 — deep GRU with short lookback. 3/3 positive windows, Sharpe 0.61.
+- **Crypto classification improved**: BTC/USDT LSTM achieves Sharpe 2.17 (previously all-negative). ETH/USDT LSTM reaches 5.67, but likely overfitting with only 661 samples.
+- **No statistical significance**: After 11 cycles, no model reliably outperforms buy-and-hold (p > 0.05), consistent with weak-form EMH.
 
 See `reports/cycle_11/` for full metrics and details.

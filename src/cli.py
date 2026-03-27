@@ -187,7 +187,8 @@ def _build_ensemble_result(
         ensemble_preds, classification=classification, allow_short=allow_short,
         confidence_weighted=confidence_weighted,
     )
-    position = _apply_min_holding_period(position, min_holding_period)
+    cw_threshold = 0.1 if confidence_weighted else 0.0
+    position = _apply_min_holding_period(position, min_holding_period, cw_threshold)
     cost = cost_bps / 10_000
     trades = np.abs(np.diff(position, prepend=0))
     strategy_returns = position * all_actuals - trades * cost
@@ -265,6 +266,7 @@ def run_experiment(config: dict) -> dict:
     confidence_weighted = eval_cfg.get("confidence_weighted", False)
     sharpe_loss = eval_cfg.get("sharpe_loss", False)
     sharpe_loss_weight = eval_cfg.get("sharpe_loss_weight", 0.3)
+    dropout_levels = eval_cfg.get("dropout_sweep", None)
 
     all_ticker_results = {}
 
@@ -358,6 +360,7 @@ def run_experiment(config: dict) -> dict:
                     hidden_size_levels=hidden_size_levels,
                     num_layers_levels=num_layers_levels,
                     seq_len_levels=seq_len_sweep_levels,
+                    dropout_levels=dropout_levels,
                     n_samples=joint_search_samples,
                     train_size=eval_cfg.get("train_size", 500),
                     test_size=eval_cfg.get("test_size", 60),

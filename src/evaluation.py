@@ -55,14 +55,20 @@ def get_annualization_factor(interval: str = "1d") -> int:
     return ANNUALIZATION_FACTORS.get(interval, 252)
 
 
-def _apply_min_holding_period(position: np.ndarray, min_hold: int) -> np.ndarray:
+def _apply_min_holding_period(
+    position: np.ndarray, min_hold: int, change_threshold: float = 0.0,
+) -> np.ndarray:
     """Enforce minimum holding period on position changes.
 
     Once a position change occurs, the new position is held for at least
     min_hold periods before another change is allowed. This reduces
     unnecessary trade churn from noisy predictions.
+
+    Cycle 11: Added change_threshold for confidence-weighted positions.
+    Position changes smaller than the threshold are suppressed, reducing
+    micro-trades from continuous position sizing.
     """
-    if min_hold <= 1:
+    if min_hold <= 1 and change_threshold <= 0:
         return position
     result = position.copy()
     hold_counter = 0
@@ -70,8 +76,12 @@ def _apply_min_holding_period(position: np.ndarray, min_hold: int) -> np.ndarray
         if hold_counter > 0:
             result[i] = result[i - 1]
             hold_counter -= 1
-        elif result[i] != result[i - 1]:
-            hold_counter = min_hold - 1
+        else:
+            change = abs(result[i] - result[i - 1])
+            if change > change_threshold:
+                hold_counter = min_hold - 1
+            else:
+                result[i] = result[i - 1]
     return result
 
 
@@ -158,7 +168,8 @@ def compute_trading_metrics(
                 position = np.sign(predictions)  # +1, 0, or -1
             else:
                 position = (predictions > 0).astype(float)
-    position = _apply_min_holding_period(position, min_holding_period)
+    cw_threshold = 0.1 if confidence_weighted else 0.0
+    position = _apply_min_holding_period(position, min_holding_period, cw_threshold)
     trades = np.abs(np.diff(position, prepend=0))
 
     # Strategy returns
@@ -647,7 +658,8 @@ def walk_forward_validation(
         all_preds, classification=classification, allow_short=allow_short,
         confidence_weighted=confidence_weighted,
     )
-    position = _apply_min_holding_period(position, min_holding_period)
+    cw_threshold = 0.1 if confidence_weighted else 0.0
+    position = _apply_min_holding_period(position, min_holding_period, cw_threshold)
     cost = cost_bps / 10_000
     trades = np.abs(np.diff(position, prepend=0))
     strategy_returns = position * all_actuals - trades * cost
@@ -1305,7 +1317,8 @@ def walk_forward_validation_multiseed(
         all_preds, classification=classification, allow_short=allow_short,
         confidence_weighted=confidence_weighted,
     )
-    position = _apply_min_holding_period(position, min_holding_period)
+    cw_threshold = 0.1 if confidence_weighted else 0.0
+    position = _apply_min_holding_period(position, min_holding_period, cw_threshold)
     cost = cost_bps / 10_000
     trades = np.abs(np.diff(position, prepend=0))
     strategy_returns = position * all_actuals - trades * cost
