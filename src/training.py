@@ -6,15 +6,71 @@ Cycle 7: Added linear warm-up LR scheduling for Transformer convergence.
 Cycle 8: Added early stopping with validation split to reduce overfitting.
 Cycle 9: Fixed early stopping + warmup interaction -- early stopping only
 activates after warmup phase completes.
+Cycle 11: Added differentiable Sharpe ratio loss for direct risk-adjusted
+return optimization, addressing the buy-and-hold approximation problem.
 """
 
 import logging
 
 import numpy as np
 import torch
+import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
 
 logger = logging.getLogger(__name__)
+
+
+class DifferentiableSharpe(nn.Module):
+    """Differentiable Sharpe ratio loss for direct optimization.
+
+    Cycle 11: Instead of MSE (which optimizes for prediction accuracy),
+    this loss directly optimizes for risk-adjusted returns. The model
+    output is treated as a position signal, and the loss is the negative
+    Sharpe ratio of the resulting strategy.
+
+    This encourages the model to produce signals that maximize Sharpe
+    rather than just minimizing prediction error, addressing the issue
+    where models learn to approximate buy-and-hold (OQ#6).
+    """
+
+    def __init__(self, ann_factor: float = 252.0, cost_bps: float = 10.0):
+        super().__init__()
+        self.ann_factor = ann_factor
+        self.cost_bps = cost_bps
+
+    def forward(self, predictions: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+        """Compute negative Sharpe ratio as loss.
+
+        Args:
+            predictions: Model output (interpreted as position signal via tanh)
+            targets: Actual returns for the next period
+        """
+        # Convert predictions to soft positions via tanh (range [-1, 1])
+        positions = torch.tanh(predictions)
+
+        # Strategy returns = position * actual_return
+        strategy_returns = positions * targets
+
+        # Approximate transaction costs from position changes
+        # Use soft position changes (no discrete jumps)
+        cost = self.cost_bps / 10_000
+        if len(positions) > 1:
+            position_changes = torch.abs(positions[1:] - positions[:-1])
+            costs = position_changes * cost
+            # First period has entry cost
+            first_cost = torch.abs(positions[0:1]) * cost
+            all_costs = torch.cat([first_cost, costs])
+            net_returns = strategy_returns - all_costs
+        else:
+            net_returns = strategy_returns - torch.abs(positions) * cost
+
+        mean_ret = net_returns.mean()
+        std_ret = net_returns.std() + 1e-8  # stability
+
+        # Negative Sharpe (we minimize loss, so negate)
+        neg_sharpe = -(mean_ret / std_ret) * (self.ann_factor ** 0.5)
+
+        return neg_sharpe
 
 
 class TimeSeriesDataset(Dataset):
@@ -86,6 +142,10 @@ def train_model(
     warmup_epochs: int = 0,
     early_stopping_patience: int = 0,
     val_fraction: float = 0.1,
+    sharpe_loss: bool = False,
+    sharpe_loss_weight: float = 0.5,
+    ann_factor: float = 252.0,
+    cost_bps: float = 10.0,
 ) -> list[float]:
     """Train model and return loss history.
 
@@ -93,15 +153,25 @@ def train_model(
     Cycle 5: Added classification mode with BCE loss.
     Cycle 7: Added linear warm-up for Transformer convergence.
     Cycle 8: Added early stopping with validation split.
+    Cycle 11: Added Sharpe-aware loss (blended with MSE) for regression models.
     warmup_epochs: number of epochs for linear LR warm-up from lr/10 to lr.
     early_stopping_patience: stop if val loss doesn't improve for this many epochs (0=disabled).
     val_fraction: fraction of training data to use for validation when early stopping is enabled.
+    sharpe_loss: if True, use blended MSE + Sharpe loss for regression (ignored for classification).
+    sharpe_loss_weight: weight of Sharpe loss in blend (0=pure MSE, 1=pure Sharpe).
     """
     import copy
 
     model = model.to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
     criterion = torch.nn.BCELoss() if classification else torch.nn.MSELoss()
+
+    # Cycle 11: Sharpe-aware loss (only for regression mode)
+    sharpe_criterion = None
+    if sharpe_loss and not classification:
+        sharpe_criterion = DifferentiableSharpe(
+            ann_factor=ann_factor, cost_bps=cost_bps
+        ).to(device)
 
     # Split train_ds into train/val if early stopping is enabled
     val_loader = None
@@ -142,7 +212,13 @@ def train_model(
             x_batch, y_batch = x_batch.to(device), y_batch.to(device)
             optimizer.zero_grad()
             pred = model(x_batch)
-            loss = criterion(pred, y_batch)
+            base_loss = criterion(pred, y_batch)
+            # Cycle 11: Blend MSE and Sharpe loss for regression
+            if sharpe_criterion is not None and len(pred) >= 4:
+                s_loss = sharpe_criterion(pred, y_batch)
+                loss = (1 - sharpe_loss_weight) * base_loss + sharpe_loss_weight * s_loss
+            else:
+                loss = base_loss
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             optimizer.step()

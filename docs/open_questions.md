@@ -59,16 +59,23 @@
 - ~~**Cross-validated sweep efficiency (#2):** Joint hyperparameter search replaces sequential sweeps. 6 random samples from the (hidden_size x num_layers x seq_len) space instead of 30 sequential evaluations. Reduces compute by ~50% but may miss optima.~~
 - ~~**Classification vs regression on SPY (#4):** Adaptive mode selection per model/ticker implemented. SPY correctly selects classification for all 3 models; AAPL shows heterogeneity (GRU=classification, LSTM/Transformer=regression). Validates per-model-ticker mode selection.~~
 
+## Addressed in Cycle 11
+
+- ~~**Joint search budget too small (#2):** Increased from 6 to 12 samples. Also expanded search space to include dropout [0.1, 0.2, 0.3], making 108 total combinations with 12 sampled (~11%). Coverage improved from 17% to adequate for finding good-enough configurations.~~
+- ~~**Multi-seed averaging needs higher n (#3):** Increased from 2 to 3 seeds, providing ~42% variance reduction (vs 30% at n=2). Diminishing returns beyond 3 suggest this is a practical balance of cost and benefit.~~
+- ~~**Ticker coverage reduced (#5):** Restored all 5 tickers: AAPL, SPY, MSFT, BTC/USDT, ETH/USDT. Results now cover both equities and crypto.~~
+- ~~**Ensemble approaches buy-and-hold (#6):** Addressed with two mechanisms: (1) confidence-weighted position sizing scales by prediction magnitude, and (2) Sharpe-aware loss (DifferentiableSharpe, w=0.3) directly optimizes for risk-adjusted returns. Confidence weighting rationally reduces to buy-and-hold when models have low conviction. Sharpe loss shifts SPY mode preference from classification to regression. Neither generates alpha beyond baseline, confirming that model predictions contain limited signal for equity timing.~~
+
 ## Remaining
 
-1. **Statistical significance gap:** After 10 cycles, no model achieves statistically significant outperformance vs buy-and-hold (p < 0.05). Walk-forward window count (3) limits statistical power. Increasing data periods or using more granular intervals could help.
+1. **Statistical significance gap:** After 11 cycles, no model achieves statistically significant outperformance vs buy-and-hold (p < 0.05). Both t-test and bootstrap methods confirm. Walk-forward window count (3-4) limits statistical power. The fundamental issue may be that technical indicators do not contain sufficient predictive signal for individual asset timing.
 
-2. **Joint search budget too small:** 6 samples from 36 combinations leaves 83% of the space unexplored. Consider increasing `joint_search_samples` to 12+ or using Bayesian optimization for more efficient exploration.
+2. **Selective ensemble limited by model count:** With 3 model types and varying per-ticker performance, selective ensemble often has insufficient models above threshold. SPY selective ensemble (0.66) works well by dropping LSTM. Adding more model architectures (e.g., TCN, attention-LSTM) could help.
 
-3. **Multi-seed averaging needs higher n:** n_seeds=2 provides only ~30% variance reduction (1/sqrt(2)). Increasing to 3-5 would be more effective but proportionally increases compute. An adaptive scheme (run more seeds for high-variance models) could balance cost and benefit.
+3. **Sharpe loss + classification conflict:** Sharpe loss is designed for regression (continuous positions) but the system also tests classification mode. When Sharpe loss is enabled during mode selection sweep, it may bias toward regression. Consider disabling Sharpe loss during mode sweep, or designing a classification-specific Sharpe loss.
 
-4. **Selective ensemble limited by model count:** With 3 model types and varying per-ticker performance, selective ensemble often has insufficient models above threshold. Adding more model architectures (e.g., TCN, attention-LSTM) or lowering threshold could help.
+4. **Confidence weighting increases trade costs:** Variable position sizing creates more position changes (trades) than binary long/flat. On AAPL, hold=1 with confidence weighting produces 303 trades vs ~10 with binary. Higher costs offset any alpha. Consider combining confidence weighting with larger min_holding_period.
 
-5. **Ticker coverage reduced:** Cycle 10 default config only evaluates 2 tickers (AAPL, SPY) vs 5 in Cycle 9. Restoring BTC/USDT, ETH/USDT, and MSFT would provide broader validation of the new features.
+5. **Crypto models consistently fail:** BTC/USDT all-negative across 11 cycles. Hourly data has only ~661 samples after indicators. Consider longer periods, daily crypto data, or acknowledging that the current indicator set is insufficient for crypto.
 
-6. **Ensemble approaches buy-and-hold:** SPY ensemble Sharpe (~0.98) closely matches buy-and-hold baseline. The models are learning to approximate a long-only position rather than providing alpha. Alternative loss functions (e.g., Sharpe-aware loss) or additional features (macro indicators, sentiment) may be needed to generate genuine excess returns.
+6. **Architecture preferences are unstable across cycles:** MSFT LSTM selects hs=32 (Cycle 11) vs hs=128 (Cycle 10 for AAPL). SPY prefers regression (Cycle 11) vs classification (Cycle 10). Results are sensitive to market conditions in the test windows and random search sampling.

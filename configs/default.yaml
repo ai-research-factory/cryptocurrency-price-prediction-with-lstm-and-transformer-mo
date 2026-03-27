@@ -1,5 +1,6 @@
 data:
-  tickers: ["AAPL", "SPY"]
+  # Cycle 11: Restored MSFT and BTC/USDT for broader validation (OQ#5)
+  tickers: ["AAPL", "SPY", "MSFT", "BTC/USDT", "ETH/USDT"]
   interval: "1d"
   period: "5y"
   # Per-ticker overrides for interval/period
@@ -86,9 +87,18 @@ evaluation:
   selective_ensemble: true
   selective_ensemble_threshold: 0.0
   # Cycle 10: multi-seed averaging (average predictions across N seeds)
-  n_seeds: 2
+  # Cycle 11: Increased from 2 to 3 for ~42% variance reduction (OQ#3)
+  n_seeds: 3
   # Cycle 10: joint hyperparameter search (replaces sequential hs/nl/sl sweeps)
   joint_search: true
-  joint_search_samples: 6
+  # Cycle 11: Increased from 6 to 12 for better coverage (OQ#2)
+  joint_search_samples: 12
   # Cycle 10: adaptive mode selection (auto-select regression vs classification)
   adaptive_mode: true
+  # Cycle 11: confidence-weighted position sizing (OQ#6 - differentiate from buy-and-hold)
+  confidence_weighted: true
+  # Cycle 11: Sharpe-aware loss (blended MSE + differentiable Sharpe for regression)
+  sharpe_loss: true
+  sharpe_loss_weight: 0.3
+  # Cycle 11: dropout levels for joint search (regularization tuning)
+  dropout_sweep: [0.1, 0.2, 0.3]

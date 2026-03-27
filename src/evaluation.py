@@ -22,6 +22,10 @@ Cycle 9: Added num_layers search, selective ensemble (drop underperformers).
 Cycle 10: Added multi-seed averaging for prediction stability,
 joint hyperparameter search replacing multiplicative grid,
 and adaptive mode selection (classification vs regression per model/ticker).
+
+Cycle 11: Added differentiable Sharpe loss for direct risk-adjusted return
+optimization, bootstrap significance testing for higher statistical power,
+increased joint search samples and seed count.
 """
 
 import logging
@@ -71,6 +75,41 @@ def _apply_min_holding_period(position: np.ndarray, min_hold: int) -> np.ndarray
     return result
 
 
+def _build_position(
+    predictions: np.ndarray,
+    classification: bool = False,
+    allow_short: bool = False,
+    confidence_weighted: bool = False,
+) -> np.ndarray:
+    """Build position array from predictions.
+
+    Cycle 11: Extracted to avoid duplicating position logic across functions.
+    """
+    if classification:
+        if confidence_weighted:
+            raw_position = (predictions - 0.5) * 2.0
+            if not allow_short:
+                raw_position = np.clip(raw_position, 0.0, 1.0)
+            return np.clip(raw_position, -1.0, 1.0)
+        else:
+            if allow_short:
+                return np.where(predictions > 0.5, 1.0, -1.0)
+            else:
+                return (predictions > 0.5).astype(float)
+    else:
+        if confidence_weighted:
+            pred_std = np.std(predictions) if np.std(predictions) > 1e-10 else 1.0
+            raw_position = predictions / pred_std
+            if not allow_short:
+                raw_position = np.clip(raw_position, 0.0, None)
+            return np.clip(raw_position, -1.0, 1.0)
+        else:
+            if allow_short:
+                return np.sign(predictions)
+            else:
+                return (predictions > 0).astype(float)
+
+
 def compute_trading_metrics(
     predictions: np.ndarray,
     actual_returns: np.ndarray,
@@ -79,28 +118,46 @@ def compute_trading_metrics(
     min_holding_period: int = 1,
     allow_short: bool = False,
     classification: bool = False,
+    confidence_weighted: bool = False,
 ) -> dict:
     """Compute trading metrics from predicted vs actual returns.
 
     Strategy: go long when predicted return > 0, else flat (or short if allow_short).
     For classification mode, predictions are probabilities: >0.5 = long, <0.5 = short/flat.
     Cycle 5: Added long/short strategy and classification mode support.
+    Cycle 11: Added confidence_weighted mode -- position size scales with prediction
+    magnitude (clipped to [-1, 1]) to differentiate from constant buy-and-hold.
     """
     ann_factor = get_annualization_factor(interval)
     cost = cost_bps / 10_000
 
     if classification:
         # Predictions are probabilities [0, 1]; threshold at 0.5
-        if allow_short:
-            position = np.where(predictions > 0.5, 1.0, -1.0)
+        if confidence_weighted:
+            # Scale position by distance from 0.5 threshold: 0→-1, 0.5→0, 1→+1
+            raw_position = (predictions - 0.5) * 2.0
+            if not allow_short:
+                raw_position = np.clip(raw_position, 0.0, 1.0)
+            position = np.clip(raw_position, -1.0, 1.0)
         else:
-            position = (predictions > 0.5).astype(float)
+            if allow_short:
+                position = np.where(predictions > 0.5, 1.0, -1.0)
+            else:
+                position = (predictions > 0.5).astype(float)
     else:
         # Predictions are return forecasts
-        if allow_short:
-            position = np.sign(predictions)  # +1, 0, or -1
+        if confidence_weighted:
+            # Scale position by prediction magnitude, normalized by rolling std
+            pred_std = np.std(predictions) if np.std(predictions) > 1e-10 else 1.0
+            raw_position = predictions / pred_std
+            if not allow_short:
+                raw_position = np.clip(raw_position, 0.0, None)
+            position = np.clip(raw_position, -1.0, 1.0)
         else:
-            position = (predictions > 0).astype(float)
+            if allow_short:
+                position = np.sign(predictions)  # +1, 0, or -1
+            else:
+                position = (predictions > 0).astype(float)
     position = _apply_min_holding_period(position, min_holding_period)
     trades = np.abs(np.diff(position, prepend=0))
 
@@ -217,6 +274,62 @@ def compute_significance_vs_baseline(
     }
 
 
+def bootstrap_significance(
+    strategy_returns: np.ndarray,
+    baseline_returns: np.ndarray,
+    n_bootstrap: int = 10000,
+    random_seed: int = 42,
+) -> dict:
+    """Bootstrap test for strategy vs baseline Sharpe ratio difference.
+
+    Cycle 11: The t-test with only 3 walk-forward windows has very low
+    statistical power (OQ#1). Bootstrap resampling of daily excess returns
+    provides more reliable significance estimates by generating an empirical
+    distribution of the mean excess return.
+
+    Returns dict with bootstrap p-value, confidence intervals, and effect size.
+    """
+    excess = strategy_returns - baseline_returns
+    n = len(excess)
+    if n < 10:
+        return {
+            "bootstrap_p_value": 1.0,
+            "bootstrap_significant_5pct": False,
+            "ci_95_lower": 0.0,
+            "ci_95_upper": 0.0,
+            "observed_mean_excess": 0.0,
+            "n_bootstrap": 0,
+        }
+
+    rng = np.random.RandomState(random_seed)
+    observed_mean = np.mean(excess)
+
+    # Bootstrap: resample excess returns with replacement
+    boot_means = np.empty(n_bootstrap)
+    for i in range(n_bootstrap):
+        sample = rng.choice(excess, size=n, replace=True)
+        boot_means[i] = np.mean(sample)
+
+    # Two-sided p-value: fraction of bootstrap means on wrong side of zero
+    if observed_mean >= 0:
+        p_value = 2 * np.mean(boot_means <= 0)
+    else:
+        p_value = 2 * np.mean(boot_means >= 0)
+    p_value = min(p_value, 1.0)
+
+    ci_lower = float(np.percentile(boot_means, 2.5))
+    ci_upper = float(np.percentile(boot_means, 97.5))
+
+    return {
+        "bootstrap_p_value": float(p_value),
+        "bootstrap_significant_5pct": bool(p_value < 0.05),
+        "ci_95_lower": ci_lower,
+        "ci_95_upper": ci_upper,
+        "observed_mean_excess": float(observed_mean),
+        "n_bootstrap": n_bootstrap,
+    }
+
+
 def cost_sensitivity_analysis(
     predictions: np.ndarray,
     actual_returns: np.ndarray,
@@ -225,6 +338,7 @@ def cost_sensitivity_analysis(
     min_holding_period: int = 1,
     allow_short: bool = False,
     classification: bool = False,
+    confidence_weighted: bool = False,
 ) -> list[dict]:
     """Evaluate strategy at multiple transaction cost levels."""
     results = []
@@ -232,6 +346,7 @@ def cost_sensitivity_analysis(
         metrics = compute_trading_metrics(
             predictions, actual_returns, cost_bps, interval, min_holding_period,
             allow_short=allow_short, classification=classification,
+            confidence_weighted=confidence_weighted,
         )
         results.append({
             "cost_bps": cost_bps,
@@ -251,6 +366,7 @@ def min_holding_period_sweep(
     interval: str = "1d",
     allow_short: bool = False,
     classification: bool = False,
+    confidence_weighted: bool = False,
 ) -> list[dict]:
     """Sweep minimum holding periods to find optimal trade frequency.
 
@@ -261,6 +377,7 @@ def min_holding_period_sweep(
         metrics = compute_trading_metrics(
             predictions, actual_returns, cost_bps, interval, hold,
             allow_short=allow_short, classification=classification,
+            confidence_weighted=confidence_weighted,
         )
         results.append({
             "min_hold": hold,
@@ -417,6 +534,9 @@ def walk_forward_validation(
     min_hold_sweep_levels: Optional[list[int]] = None,
     warmup_epochs: int = 0,
     early_stopping_patience: int = 0,
+    confidence_weighted: bool = False,
+    sharpe_loss: bool = False,
+    sharpe_loss_weight: float = 0.5,
 ) -> dict:
     """Run purged walk-forward validation.
 
@@ -425,8 +545,10 @@ def walk_forward_validation(
 
     Cycle 5: Added allow_short, classification, and min_hold_sweep_levels.
     Cycle 8: Added early_stopping_patience for training.
+    Cycle 11: Added sharpe_loss for Sharpe-aware training, bootstrap significance.
     """
     n = len(features)
+    ann_factor = get_annualization_factor(interval)
 
     # Adaptive window sizing to ensure sufficient windows
     if adaptive_window:
@@ -475,6 +597,10 @@ def walk_forward_validation(
             device=device, classification=classification,
             warmup_epochs=warmup_epochs,
             early_stopping_patience=early_stopping_patience,
+            sharpe_loss=sharpe_loss,
+            sharpe_loss_weight=sharpe_loss_weight,
+            ann_factor=float(ann_factor),
+            cost_bps=cost_bps,
         )
 
         preds = predict(model, test_ds, device=device)
@@ -484,6 +610,7 @@ def walk_forward_validation(
         w_metrics = compute_trading_metrics(
             preds, actuals, cost_bps, interval, min_holding_period,
             allow_short=allow_short, classification=classification,
+            confidence_weighted=confidence_weighted,
         )
         w_metrics["window"] = window_idx
         window_metrics.append(w_metrics)
@@ -510,25 +637,23 @@ def walk_forward_validation(
     agg_metrics = compute_trading_metrics(
         all_preds, all_actuals, cost_bps, interval, min_holding_period,
         allow_short=allow_short, classification=classification,
+        confidence_weighted=confidence_weighted,
     )
     baseline_metrics = compute_naive_baseline(all_actuals, cost_bps, interval)
 
     # Strategy vs baseline significance test
-    if classification:
-        if allow_short:
-            position = np.where(all_preds > 0.5, 1.0, -1.0)
-        else:
-            position = (all_preds > 0.5).astype(float)
-    else:
-        if allow_short:
-            position = np.sign(all_preds)
-        else:
-            position = (all_preds > 0).astype(float)
+    # Cycle 11: Use _build_position helper for consistent position logic
+    position = _build_position(
+        all_preds, classification=classification, allow_short=allow_short,
+        confidence_weighted=confidence_weighted,
+    )
     position = _apply_min_holding_period(position, min_holding_period)
     cost = cost_bps / 10_000
     trades = np.abs(np.diff(position, prepend=0))
     strategy_returns = position * all_actuals - trades * cost
     significance = compute_significance_vs_baseline(strategy_returns, all_actuals)
+    # Cycle 11: Bootstrap significance for higher statistical power
+    boot_significance = bootstrap_significance(strategy_returns, all_actuals)
 
     # Stability: fraction of windows with positive Sharpe
     positive_windows = sum(1 for w in window_metrics if w["sharpe_ratio"] > 0)
@@ -549,6 +674,7 @@ def walk_forward_validation(
         cost_sensitivity = cost_sensitivity_analysis(
             all_preds, all_actuals, cost_sensitivity_levels, interval,
             min_holding_period, allow_short=allow_short, classification=classification,
+            confidence_weighted=confidence_weighted,
         )
 
     # Cycle 5: Min holding period sweep
@@ -557,6 +683,7 @@ def walk_forward_validation(
         hold_sweep = min_holding_period_sweep(
             all_preds, all_actuals, min_hold_sweep_levels, cost_bps, interval,
             allow_short=allow_short, classification=classification,
+            confidence_weighted=confidence_weighted,
         )
 
     result = {
@@ -564,6 +691,7 @@ def walk_forward_validation(
         "aggregate": agg_metrics,
         "baseline_buy_hold": baseline_metrics,
         "significance_vs_baseline": significance,
+        "bootstrap_significance": boot_significance,
         "stability_ratio": float(stability),
         "n_windows": len(window_metrics),
         "positive_windows": positive_windows,
@@ -582,6 +710,7 @@ def walk_forward_validation(
             "min_holding_period": min_holding_period,
             "allow_short": allow_short,
             "classification": classification,
+            "confidence_weighted": confidence_weighted,
         },
     }
     if cost_sensitivity is not None:
@@ -1065,16 +1194,20 @@ def walk_forward_validation_multiseed(
     warmup_epochs: int = 0,
     early_stopping_patience: int = 0,
     n_seeds: int = 3,
+    confidence_weighted: bool = False,
+    sharpe_loss: bool = False,
+    sharpe_loss_weight: float = 0.5,
 ) -> dict:
     """Walk-forward validation with multi-seed prediction averaging.
 
     Cycle 10: Trains each window N times with different random seeds and
-    averages predictions to reduce initialization variance. This addresses
-    the result instability observed across cycles (OQ#1).
+    averages predictions to reduce initialization variance.
+    Cycle 11: Added sharpe_loss, bootstrap significance.
     """
     import torch
 
     n = len(features)
+    ann_factor = get_annualization_factor(interval)
 
     if adaptive_window:
         train_size, test_size, step_size = _compute_adaptive_window_sizes(
@@ -1124,6 +1257,10 @@ def walk_forward_validation_multiseed(
                 device=device, classification=classification,
                 warmup_epochs=warmup_epochs,
                 early_stopping_patience=early_stopping_patience,
+                sharpe_loss=sharpe_loss,
+                sharpe_loss_weight=sharpe_loss_weight,
+                ann_factor=float(ann_factor),
+                cost_bps=cost_bps,
             )
             preds = predict(model, test_ds, device=device)
             seed_preds.append(preds)
@@ -1135,6 +1272,7 @@ def walk_forward_validation_multiseed(
         w_metrics = compute_trading_metrics(
             preds, actuals, cost_bps, interval, min_holding_period,
             allow_short=allow_short, classification=classification,
+            confidence_weighted=confidence_weighted,
         )
         w_metrics["window"] = window_idx
         window_metrics.append(w_metrics)
@@ -1159,24 +1297,20 @@ def walk_forward_validation_multiseed(
     agg_metrics = compute_trading_metrics(
         all_preds, all_actuals, cost_bps, interval, min_holding_period,
         allow_short=allow_short, classification=classification,
+        confidence_weighted=confidence_weighted,
     )
     baseline_metrics = compute_naive_baseline(all_actuals, cost_bps, interval)
 
-    if classification:
-        if allow_short:
-            position = np.where(all_preds > 0.5, 1.0, -1.0)
-        else:
-            position = (all_preds > 0.5).astype(float)
-    else:
-        if allow_short:
-            position = np.sign(all_preds)
-        else:
-            position = (all_preds > 0).astype(float)
+    position = _build_position(
+        all_preds, classification=classification, allow_short=allow_short,
+        confidence_weighted=confidence_weighted,
+    )
     position = _apply_min_holding_period(position, min_holding_period)
     cost = cost_bps / 10_000
     trades = np.abs(np.diff(position, prepend=0))
     strategy_returns = position * all_actuals - trades * cost
     significance = compute_significance_vs_baseline(strategy_returns, all_actuals)
+    boot_significance = bootstrap_significance(strategy_returns, all_actuals)
 
     positive_windows = sum(1 for w in window_metrics if w["sharpe_ratio"] > 0)
     stability = positive_windows / max(len(window_metrics), 1)
@@ -1194,6 +1328,7 @@ def walk_forward_validation_multiseed(
         cost_sensitivity = cost_sensitivity_analysis(
             all_preds, all_actuals, cost_sensitivity_levels, interval,
             min_holding_period, allow_short=allow_short, classification=classification,
+            confidence_weighted=confidence_weighted,
         )
 
     hold_sweep = None
@@ -1201,6 +1336,7 @@ def walk_forward_validation_multiseed(
         hold_sweep = min_holding_period_sweep(
             all_preds, all_actuals, min_hold_sweep_levels, cost_bps, interval,
             allow_short=allow_short, classification=classification,
+            confidence_weighted=confidence_weighted,
         )
 
     result = {
@@ -1209,6 +1345,7 @@ def walk_forward_validation_multiseed(
         "aggregate": agg_metrics,
         "baseline_buy_hold": baseline_metrics,
         "significance_vs_baseline": significance,
+        "bootstrap_significance": boot_significance,
         "stability_ratio": float(stability),
         "n_windows": len(window_metrics),
         "positive_windows": positive_windows,
@@ -1227,6 +1364,7 @@ def walk_forward_validation_multiseed(
             "min_holding_period": min_holding_period,
             "allow_short": allow_short,
             "classification": classification,
+            "confidence_weighted": confidence_weighted,
             "n_seeds": n_seeds,
         },
     }
@@ -1246,6 +1384,7 @@ def joint_hyperparam_search(
     hidden_size_levels: list[int],
     num_layers_levels: list[int],
     seq_len_levels: list[int],
+    dropout_levels: list[float] | None = None,
     n_samples: int = 12,
     train_size: int = 500,
     test_size: int = 60,
@@ -1264,17 +1403,21 @@ def joint_hyperparam_search(
     early_stopping_patience: int = 0,
     random_seed: int = 42,
 ) -> list[dict]:
-    """Joint random search over (hidden_size, num_layers, seq_len).
+    """Joint random search over (hidden_size, num_layers, seq_len, dropout).
 
-    Cycle 10: Replaces multiplicative grid search (3×3×4=36 evaluations)
-    with a random sample of n_samples configurations from the joint space.
-    This reduces computational cost while exploring diverse combinations.
+    Cycle 10: Replaces multiplicative grid search with random sampling.
+    Cycle 11: Added dropout to the joint search space for regularization tuning.
     """
     import itertools
     rng = np.random.RandomState(random_seed)
 
     # Generate full grid and sample
-    all_combos = list(itertools.product(hidden_size_levels, num_layers_levels, seq_len_levels))
+    if dropout_levels:
+        all_combos = list(itertools.product(
+            hidden_size_levels, num_layers_levels, seq_len_levels, dropout_levels))
+    else:
+        all_combos = [(hs, nl, sl, None) for hs, nl, sl in
+                      itertools.product(hidden_size_levels, num_layers_levels, seq_len_levels)]
     if n_samples >= len(all_combos):
         sampled = all_combos
     else:
@@ -1285,9 +1428,11 @@ def joint_hyperparam_search(
                 f"for {model_type}")
 
     results = []
-    for hs, nl, sl in sampled:
+    for hs, nl, sl, do in sampled:
         mkwargs = dict(model_kwargs)
         mkwargs["num_layers"] = nl
+        if do is not None:
+            mkwargs["dropout"] = do
         if model_type in ("lstm", "gru"):
             mkwargs["hidden_size"] = hs
         elif model_type == "transformer":
@@ -1320,26 +1465,26 @@ def joint_hyperparam_search(
             early_stopping_patience=early_stopping_patience,
         )
         if "error" in wf_result:
-            results.append({
-                "hidden_size": hs,
-                "num_layers": nl,
-                "seq_len": sl,
+            entry = {
+                "hidden_size": hs, "num_layers": nl, "seq_len": sl,
                 "error": wf_result["error"],
-            })
+            }
         else:
             agg = wf_result["aggregate"]
-            results.append({
-                "hidden_size": hs,
-                "num_layers": nl,
-                "seq_len": sl,
+            entry = {
+                "hidden_size": hs, "num_layers": nl, "seq_len": sl,
                 "sharpe_ratio": agg["sharpe_ratio"],
                 "sortino_ratio": agg["sortino_ratio"],
                 "total_return": agg["total_return"],
                 "n_trades": agg["n_trades"],
                 "n_windows": wf_result["n_windows"],
                 "stability_ratio": wf_result.get("stability_ratio", 0),
-            })
-        logger.info(f"    hs={hs}, nl={nl}, sl={sl} → "
+            }
+        if do is not None:
+            entry["dropout"] = do
+        results.append(entry)
+        do_str = f", do={do}" if do is not None else ""
+        logger.info(f"    hs={hs}, nl={nl}, sl={sl}{do_str} → "
                      f"Sharpe={results[-1].get('sharpe_ratio', 'err')}")
 
     return results
@@ -1349,19 +1494,22 @@ def select_optimal_joint_params(
     search_results: list[dict],
     defaults: dict,
 ) -> dict:
-    """Select the best (hidden_size, num_layers, seq_len) from joint search.
+    """Select the best (hidden_size, num_layers, seq_len, dropout) from joint search.
 
-    Cycle 10: Returns dict with 'hidden_size', 'num_layers', 'seq_len'.
+    Cycle 11: Also returns 'dropout' if searched.
     """
     valid = [r for r in search_results if "sharpe_ratio" in r and "error" not in r]
     if not valid:
         return defaults
     best = max(valid, key=lambda r: r["sharpe_ratio"])
-    return {
+    result = {
         "hidden_size": best["hidden_size"],
         "num_layers": best["num_layers"],
         "seq_len": best["seq_len"],
     }
+    if "dropout" in best:
+        result["dropout"] = best["dropout"]
+    return result
 
 
 def mode_selection_sweep(

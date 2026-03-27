@@ -13,6 +13,8 @@ Cycle 9: Added selective ensemble (drop underperforming models), per-model
 num_layers search, fixed early stopping + warmup interaction.
 Cycle 10: Added multi-seed averaging, joint hyperparameter search,
 adaptive mode selection (classification vs regression per model/ticker).
+Cycle 11: Added differentiable Sharpe loss, bootstrap significance testing,
+confidence-weighted positioning, increased search budget/seeds, restored tickers.
 """
 
 import argparse
@@ -41,6 +43,7 @@ from .evaluation import (
     walk_forward_validation_multiseed,
     joint_hyperparam_search, select_optimal_joint_params,
     mode_selection_sweep, select_optimal_mode,
+    bootstrap_significance,
 )
 
 logging.basicConfig(
@@ -103,6 +106,7 @@ def _build_ensemble_result(
     allow_short: bool = False,
     classification: bool = False,
     ensemble_method: str = "equal",
+    confidence_weighted: bool = False,
 ) -> dict | None:
     """Build ensemble result by combining predictions from all models.
 
@@ -173,20 +177,16 @@ def _build_ensemble_result(
     agg_metrics = compute_trading_metrics(
         ensemble_preds, all_actuals, cost_bps, interval, min_holding_period,
         allow_short=allow_short, classification=classification,
+        confidence_weighted=confidence_weighted,
     )
     baseline_metrics = compute_naive_baseline(all_actuals, cost_bps, interval)
 
     # Significance test
-    if classification:
-        if allow_short:
-            position = np.where(ensemble_preds > 0.5, 1.0, -1.0)
-        else:
-            position = (ensemble_preds > 0.5).astype(float)
-    else:
-        if allow_short:
-            position = np.sign(ensemble_preds)
-        else:
-            position = (ensemble_preds > 0).astype(float)
+    from .evaluation import _build_position
+    position = _build_position(
+        ensemble_preds, classification=classification, allow_short=allow_short,
+        confidence_weighted=confidence_weighted,
+    )
     position = _apply_min_holding_period(position, min_holding_period)
     cost = cost_bps / 10_000
     trades = np.abs(np.diff(position, prepend=0))
@@ -207,13 +207,14 @@ def _build_ensemble_result(
         result["cost_sensitivity"] = cost_sensitivity_analysis(
             ensemble_preds, all_actuals, cost_sensitivity_levels, interval,
             min_holding_period, allow_short=allow_short, classification=classification,
+            confidence_weighted=confidence_weighted,
         )
 
     return result
 
 
 def run_experiment(config: dict) -> dict:
-    """Run full experiment pipeline with Cycle 10 enhancements."""
+    """Run full experiment pipeline with Cycle 11 enhancements."""
     data_cfg = config["data"]
     model_cfg = config["model"]
     train_cfg = config["training"]
@@ -260,6 +261,10 @@ def run_experiment(config: dict) -> dict:
     joint_search = eval_cfg.get("joint_search", False)
     joint_search_samples = eval_cfg.get("joint_search_samples", 12)
     adaptive_mode = eval_cfg.get("adaptive_mode", False)
+    # Cycle 11: new options
+    confidence_weighted = eval_cfg.get("confidence_weighted", False)
+    sharpe_loss = eval_cfg.get("sharpe_loss", False)
+    sharpe_loss_weight = eval_cfg.get("sharpe_loss_weight", 0.3)
 
     all_ticker_results = {}
 
@@ -379,9 +384,13 @@ def run_experiment(config: dict) -> dict:
                 model_hidden_sizes[mtype] = best["hidden_size"]
                 model_num_layers[mtype] = best["num_layers"]
                 model_seq_lens[mtype] = best["seq_len"]
+                # Cycle 11: Store selected dropout if searched
+                if "dropout" in best:
+                    model_cfg.get(mtype, {})["dropout"] = best["dropout"]
                 joint_search_results[mtype] = js_results
+                do_str = f", do={best['dropout']}" if "dropout" in best else ""
                 logger.info(f"Joint search: selected hs={best['hidden_size']}, "
-                            f"nl={best['num_layers']}, sl={best['seq_len']} "
+                            f"nl={best['num_layers']}, sl={best['seq_len']}{do_str} "
                             f"for {mtype.upper()} on {ticker}")
         else:
             # Fallback: sequential sweeps (Cycles 8-9 behavior)
@@ -612,6 +621,9 @@ def run_experiment(config: dict) -> dict:
                 min_hold_sweep_levels=min_hold_sweep_levels,
                 warmup_epochs=mtype_warmup,
                 early_stopping_patience=early_stopping_patience,
+                confidence_weighted=confidence_weighted,
+                sharpe_loss=sharpe_loss,
+                sharpe_loss_weight=sharpe_loss_weight,
             )
             if n_seeds > 1:
                 wf_kwargs["n_seeds"] = n_seeds
@@ -753,6 +765,7 @@ def run_experiment(config: dict) -> dict:
                     cost_sensitivity_levels, ticker_hold,
                     allow_short=allow_short, classification=False,
                     ensemble_method=method,
+                    confidence_weighted=confidence_weighted,
                 )
                 if ensemble_result is not None:
                     model_results[f"ensemble_{method}"] = ensemble_result
@@ -786,6 +799,7 @@ def run_experiment(config: dict) -> dict:
                             cost_sensitivity_levels, ticker_hold,
                             allow_short=allow_short, classification=False,
                             ensemble_method=method,
+                            confidence_weighted=confidence_weighted,
                         )
                         if sel_ensemble is not None:
                             sel_ensemble["selective"] = True
@@ -859,6 +873,9 @@ def run_experiment(config: dict) -> dict:
             "adaptive_modes": adaptive_modes_map,
             "joint_search": bool(joint_search_results),
             "n_seeds": n_seeds if n_seeds > 1 else None,
+            "confidence_weighted": confidence_weighted,
+            "sharpe_loss": sharpe_loss,
+            "sharpe_loss_weight": sharpe_loss_weight,
             "results": model_results,
             "feature_importance": feat_importance if feat_importance else None,
         }
@@ -870,7 +887,7 @@ def run_experiment(config: dict) -> dict:
     }
 
 
-def save_results(experiment: dict, output_dir: str = "reports/cycle_10"):
+def save_results(experiment: dict, output_dir: str = "reports/cycle_11"):
     """Save experiment results for all tickers."""
     out = Path(output_dir)
     out.mkdir(parents=True, exist_ok=True)
@@ -896,6 +913,7 @@ def save_results(experiment: dict, output_dir: str = "reports/cycle_10"):
                 "aggregate": result["aggregate"],
                 "baseline_buy_hold": result.get("baseline_buy_hold", {}),
                 "significance_vs_baseline": result.get("significance_vs_baseline", {}),
+                "bootstrap_significance": result.get("bootstrap_significance", {}),
             }
             # Fields present in walk-forward results but not ensemble
             if "stability_ratio" in result:
@@ -964,6 +982,12 @@ def save_results(experiment: dict, output_dir: str = "reports/cycle_10"):
             ticker_metrics["joint_search"] = True
         if ticker_data.get("n_seeds"):
             ticker_metrics["n_seeds"] = ticker_data["n_seeds"]
+        if ticker_data.get("confidence_weighted"):
+            ticker_metrics["confidence_weighted"] = True
+        # Cycle 11: Sharpe loss flag
+        if ticker_data.get("sharpe_loss"):
+            ticker_metrics["sharpe_loss"] = True
+            ticker_metrics["sharpe_loss_weight"] = ticker_data.get("sharpe_loss_weight", 0.3)
 
         metrics["per_ticker"][ticker] = ticker_metrics
 
@@ -982,12 +1006,12 @@ def main():
     config = load_config(args.config)
     experiment = run_experiment(config)
 
-    output_dir = args.output_dir or "reports/cycle_10"
+    output_dir = args.output_dir or "reports/cycle_11"
     save_results(experiment, output_dir=output_dir)
 
     # Print summary
     print("\n" + "=" * 70)
-    print("EXPERIMENT SUMMARY (Cycle 10)")
+    print("EXPERIMENT SUMMARY (Cycle 11)")
     print("=" * 70)
     for ticker, ticker_data in experiment["ticker_results"].items():
         print(f"\n{'─'*70}")
@@ -1054,6 +1078,12 @@ def main():
             if sig:
                 print(f"    Significance:     p={sig.get('p_value', 'N/A'):.4f} "
                       f"({'significant' if sig.get('significant_5pct') else 'not significant'} at 5%)")
+            # Cycle 11: Bootstrap significance
+            boot_sig = result.get("bootstrap_significance", {})
+            if boot_sig:
+                print(f"    Bootstrap sig:    p={boot_sig.get('bootstrap_p_value', 'N/A'):.4f} "
+                      f"({'significant' if boot_sig.get('bootstrap_significant_5pct') else 'not significant'} at 5%, "
+                      f"CI=[{boot_sig.get('ci_95_lower', 0):.6f}, {boot_sig.get('ci_95_upper', 0):.6f}])")
             if "min_hold_sweep" in result:
                 print(f"    Min hold sweep:")
                 for hs in result["min_hold_sweep"]:

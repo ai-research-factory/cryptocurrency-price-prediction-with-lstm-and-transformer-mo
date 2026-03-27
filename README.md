@@ -15,7 +15,7 @@ pip install -e ".[dev]"
 python3 -m src.cli run-experiment --config configs/default.yaml
 
 # Custom output directory
-python3 -m src.cli run-experiment --config configs/default.yaml --output-dir reports/cycle_10
+python3 -m src.cli run-experiment --config configs/default.yaml --output-dir reports/cycle_11
 
 # Run tests
 python3 -m pytest tests/ -v
@@ -45,7 +45,7 @@ data:
       period: "1y"
 ```
 
-### Cycle 10 Evaluation Options
+### Cycle 11 Evaluation Options
 
 ```yaml
 evaluation:
@@ -74,10 +74,14 @@ evaluation:
   adaptive_num_layers: true                       # Auto-select best depth per model/ticker (Cycle 9)
   selective_ensemble: true                        # Drop models with negative Sharpe from ensemble (Cycle 9)
   selective_ensemble_threshold: 0.0               # Minimum Sharpe to include in selective ensemble (Cycle 9)
-  n_seeds: 2                                      # Multi-seed prediction averaging (Cycle 10)
+  n_seeds: 3                                      # Multi-seed prediction averaging (Cycle 10, increased Cycle 11)
   joint_search: true                              # Joint hyperparameter search (Cycle 10)
-  joint_search_samples: 6                         # Number of random configs to evaluate (Cycle 10)
+  joint_search_samples: 12                        # Number of random configs to evaluate (Cycle 10, increased Cycle 11)
   adaptive_mode: true                             # Auto-select regression vs classification per model/ticker (Cycle 10)
+  confidence_weighted: true                       # Scale position by prediction confidence (Cycle 11)
+  sharpe_loss: true                               # Sharpe-aware training loss for regression (Cycle 11)
+  sharpe_loss_weight: 0.3                         # Blend weight: (1-w)*MSE + w*(-Sharpe) (Cycle 11)
+  dropout_sweep: [0.1, 0.2, 0.3]                  # Dropout levels in joint search (Cycle 11)
 ```
 
 ## Project Structure
@@ -88,9 +92,9 @@ src/
   preprocessing.py   -- Feature normalization, outlier clipping, stationarity transforms
   indicators.py      -- Technical indicators with frequency-adaptive periods (Cycle 6)
   models.py          -- LSTM, GRU, and Transformer architectures (Cycle 6: +GRU)
-  training.py        -- Dataset preparation, training with LR scheduling + warm-up + early stopping (Cycle 9: warmup-aware)
-  evaluation.py      -- Purged walk-forward, cost sensitivity, risk metrics, regime short, sweeps, multi-seed, joint search, mode selection (Cycle 10)
-  cli.py             -- CLI experiment runner (adaptive architecture, multi-seed, joint search, adaptive mode)
+  training.py        -- Dataset preparation, training with LR scheduling + warm-up + early stopping + Sharpe-aware loss (Cycle 11)
+  evaluation.py      -- Purged walk-forward, cost sensitivity, risk metrics, regime short, sweeps, multi-seed, joint search, mode selection, confidence weighting (Cycle 11)
+  cli.py             -- CLI experiment runner (adaptive architecture, multi-seed, joint search, adaptive mode, confidence weighting, Sharpe loss)
 configs/
   default.yaml       -- Default experiment configuration
 tests/               -- Unit tests for all modules (83 tests)
@@ -104,6 +108,7 @@ reports/cycle_7/     -- Cycle 7 experiment results
 reports/cycle_8/     -- Cycle 8 experiment results
 reports/cycle_9/     -- Cycle 9 experiment results
 reports/cycle_10/    -- Cycle 10 experiment results
+reports/cycle_11/    -- Cycle 11 experiment results
 ```
 
 ## Features
@@ -142,33 +147,27 @@ reports/cycle_10/    -- Cycle 10 experiment results
 - **Multi-seed prediction averaging:** Averages predictions across N random seeds to reduce initialization variance (Cycle 10)
 - **Joint hyperparameter search:** Random search over (hidden_size, num_layers, seq_len) space replacing sequential sweeps (Cycle 10)
 - **Adaptive mode selection:** Auto-selects regression vs classification per model/ticker (Cycle 10)
+- **Confidence-weighted position sizing:** Scale positions by prediction magnitude instead of binary (Cycle 11)
+- **Sharpe-aware loss:** Blended MSE + differentiable Sharpe ratio loss for regression models (Cycle 11)
+- **Dropout in joint search:** Adds regularization tuning to hyperparameter search space (Cycle 11)
 
-## Cycle 10 Results
+## Cycle 11 Results
 
-### AAPL (Daily, adaptive_hold=10, joint_search, n_seeds=2, adaptive_mode)
+### Per-Ticker Best Models (5 tickers, n_seeds=3, joint_search=12, Sharpe loss, confidence-weighted)
 
-| Model | Sharpe | Return | Trades | Notes |
-|-------|--------|--------|--------|-------|
-| **Transformer (regression)** | **0.37** | **+7.7%** | 11 | HS=128, NL=2, SL=30, stability=0.67 |
-| GRU (classification) | -0.35 | -5.3% | 10 | HS=128, NL=2, SL=30 |
-| LSTM (regression) | -0.73 | -18.2% | 6 | HS=128, NL=2, SL=50 |
-| Buy-Hold | 0.35-0.44 | +7-9% | -- | |
+| Ticker   | Best Model          | Sharpe | Return  | Baseline | Stability |
+|----------|---------------------|--------|---------|----------|-----------|
+| AAPL     | Ensemble (equal)    | 0.44   | +24.2%  | 0.44     | --        |
+| SPY      | Sel. Ensemble       | 0.66   | +19.1%  | 1.12     | --        |
+| MSFT     | LSTM (reg)          | 0.61   | +23.2%  | 1.01     | 1.00      |
+| BTC/USDT | LSTM (reg)          | -3.09  | -1.3%   | 0.17     | 0.50      |
+| ETH/USDT | GRU (cls)           | 2.79   | +1.7%   | 0.82     | 0.50      |
 
-### SPY (Daily, adaptive_hold=1, joint_search, n_seeds=2, adaptive_mode)
+### Key Findings (Cycle 11):
+- **Confidence weighting rationally converges to buy-and-hold**: When models lack conviction, position sizes shrink toward zero. AAPL ensemble exactly matches baseline (0.44).
+- **Sharpe-aware loss shifts mode preferences**: SPY selects regression for all models (Cycle 10: all classification). The Sharpe loss term rewards calibrated magnitude signals.
+- **MSFT LSTM achieves perfect stability**: HS=32, NL=3, SL=10 — small/deep/short architecture. 3/3 positive windows.
+- **Selective ensemble effective on SPY**: Dropping negative-Sharpe LSTM improves ensemble from 0.53 to 0.66.
+- **No statistical significance**: After 11 cycles, no model significantly outperforms buy-and-hold (p > 0.05), consistent with weak-form EMH.
 
-| Model | Sharpe | Return | Trades | Notes |
-|-------|--------|--------|--------|-------|
-| **LSTM (classification)** | **0.67** | **+15.9%** | 4 | HS=128, NL=1, SL=30, stability=1.0 |
-| GRU (classification) | 0.50 | +13.1% | 7 | HS=64, NL=1, SL=20, stability=1.0 |
-| Transformer (classification) | 0.18 | +5.3% | 41 | HS=128, NL=3, SL=50, stability=0.33 |
-| Ensemble (equal) | 0.98 | +33.3% | 1 | Matches buy-and-hold |
-| Buy-Hold | 0.98-1.16 | +33-48% | -- | |
-
-### Key Findings (Cycle 10):
-- **Joint search selects larger hidden sizes (128)**: Different from Cycle 9 sequential sweeps which often selected 32. May indicate interaction effects between hyperparameters.
-- **Adaptive mode confirms SPY prefers classification**: All 3 SPY models select classification. AAPL is mixed (GRU=cls, LSTM/Transformer=reg).
-- **Multi-seed averaging at n=2 is modest**: Provides ~30% variance reduction. n=3-5 recommended for meaningful stability improvement.
-- **SPY LSTM (cls) achieves perfect stability**: 3/3 positive windows with shallow architecture (NL=1).
-- **Ensembles converge toward buy-and-hold**: SPY ensemble Sharpe 0.98 matches baseline, suggesting models learn long-bias rather than alpha.
-
-See `reports/cycle_10/` for full metrics and details.
+See `reports/cycle_11/` for full metrics and details.
