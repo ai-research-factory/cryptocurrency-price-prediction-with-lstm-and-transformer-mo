@@ -1,5 +1,5 @@
 data:
-  tickers: ["BTC/USDT", "ETH/USDT", "AAPL", "SPY", "MSFT"]
+  tickers: ["AAPL", "SPY"]
   interval: "1d"
   period: "5y"
   # Per-ticker overrides for interval/period
@@ -31,7 +31,7 @@ model:
 
 training:
   seq_len: 30
-  epochs: 50
+  epochs: 15
   batch_size: 32
   lr: 0.001
 
@@ -73,7 +73,7 @@ evaluation:
   vol_lookback: 60
   high_vol_threshold: 1.5
   # Cycle 8: early stopping to reduce overfitting (patience in epochs, 0=disabled)
-  early_stopping_patience: 7
+  early_stopping_patience: 5
   # Cycle 8: per-ticker regime threshold calibration
   regime_threshold_sweep: [1.0, 1.25, 1.5, 2.0, 2.5]
   # Cycle 8: per-model hidden size search
@@ -85,3 +85,10 @@ evaluation:
   # Cycle 9: selective ensemble (drop models with Sharpe below threshold)
   selective_ensemble: true
   selective_ensemble_threshold: 0.0
+  # Cycle 10: multi-seed averaging (average predictions across N seeds)
+  n_seeds: 2
+  # Cycle 10: joint hyperparameter search (replaces sequential hs/nl/sl sweeps)
+  joint_search: true
+  joint_search_samples: 6
+  # Cycle 10: adaptive mode selection (auto-select regression vs classification)
+  adaptive_mode: true

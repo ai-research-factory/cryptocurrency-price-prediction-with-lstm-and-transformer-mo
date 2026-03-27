@@ -15,7 +15,7 @@ pip install -e ".[dev]"
 python3 -m src.cli run-experiment --config configs/default.yaml
 
 # Custom output directory
-python3 -m src.cli run-experiment --config configs/default.yaml --output-dir reports/cycle_9
+python3 -m src.cli run-experiment --config configs/default.yaml --output-dir reports/cycle_10
 
 # Run tests
 python3 -m pytest tests/ -v
@@ -45,7 +45,7 @@ data:
       period: "1y"
 ```
 
-### Cycle 9 Evaluation Options
+### Cycle 10 Evaluation Options
 
 ```yaml
 evaluation:
@@ -66,7 +66,7 @@ evaluation:
   regime_short: true                              # Volatility-regime-based short toggling (Cycle 7)
   vol_lookback: 60                                # Rolling vol lookback for regime detection (Cycle 7)
   high_vol_threshold: 1.5                         # High-vol threshold multiplier (Cycle 7)
-  early_stopping_patience: 7                      # Early stopping patience in epochs (Cycle 8)
+  early_stopping_patience: 5                      # Early stopping patience in epochs (Cycle 8)
   regime_threshold_sweep: [1.0, 1.25, 1.5, 2.0, 2.5]  # Per-ticker regime calibration (Cycle 8)
   hidden_size_sweep: [32, 64, 128]                # Per-model hidden size search (Cycle 8)
   adaptive_hidden_size: true                      # Auto-select best hidden size per model/ticker (Cycle 8)
@@ -74,6 +74,10 @@ evaluation:
   adaptive_num_layers: true                       # Auto-select best depth per model/ticker (Cycle 9)
   selective_ensemble: true                        # Drop models with negative Sharpe from ensemble (Cycle 9)
   selective_ensemble_threshold: 0.0               # Minimum Sharpe to include in selective ensemble (Cycle 9)
+  n_seeds: 2                                      # Multi-seed prediction averaging (Cycle 10)
+  joint_search: true                              # Joint hyperparameter search (Cycle 10)
+  joint_search_samples: 6                         # Number of random configs to evaluate (Cycle 10)
+  adaptive_mode: true                             # Auto-select regression vs classification per model/ticker (Cycle 10)
 ```
 
 ## Project Structure
@@ -85,8 +89,8 @@ src/
   indicators.py      -- Technical indicators with frequency-adaptive periods (Cycle 6)
   models.py          -- LSTM, GRU, and Transformer architectures (Cycle 6: +GRU)
   training.py        -- Dataset preparation, training with LR scheduling + warm-up + early stopping (Cycle 9: warmup-aware)
-  evaluation.py      -- Purged walk-forward, cost sensitivity, risk metrics, regime short, threshold/hidden/layers sweep (Cycle 9)
-  cli.py             -- CLI experiment runner (5-ticker, adaptive architecture, selective ensemble)
+  evaluation.py      -- Purged walk-forward, cost sensitivity, risk metrics, regime short, sweeps, multi-seed, joint search, mode selection (Cycle 10)
+  cli.py             -- CLI experiment runner (adaptive architecture, multi-seed, joint search, adaptive mode)
 configs/
   default.yaml       -- Default experiment configuration
 tests/               -- Unit tests for all modules (83 tests)
@@ -99,6 +103,7 @@ reports/cycle_6/     -- Cycle 6 experiment results
 reports/cycle_7/     -- Cycle 7 experiment results
 reports/cycle_8/     -- Cycle 8 experiment results
 reports/cycle_9/     -- Cycle 9 experiment results
+reports/cycle_10/    -- Cycle 10 experiment results
 ```
 
 ## Features
@@ -134,45 +139,36 @@ reports/cycle_9/     -- Cycle 9 experiment results
 - **Selective ensemble:** Drops underperforming models (Sharpe < threshold) from ensemble (Cycle 9)
 - **Per-model num_layers search:** Auto-selects optimal depth [1, 2, 3] per model/ticker (Cycle 9)
 - **Warmup-aware early stopping:** Early stopping skips warmup phase to let LR stabilize (Cycle 9)
+- **Multi-seed prediction averaging:** Averages predictions across N random seeds to reduce initialization variance (Cycle 10)
+- **Joint hyperparameter search:** Random search over (hidden_size, num_layers, seq_len) space replacing sequential sweeps (Cycle 10)
+- **Adaptive mode selection:** Auto-selects regression vs classification per model/ticker (Cycle 10)
 
-## Cycle 9 Results
+## Cycle 10 Results
 
-### AAPL (Daily, adaptive_hold=5, adaptive HS/NL/SL)
-
-| Model | Sharpe | Return | Trades | Notes |
-|-------|--------|--------|--------|-------|
-| **Transformer (regression)** | **0.66** | **+43.6%** | 38 | HS=32, NL=1, SL=30, stability=1.0 |
-| Transformer (regime, thr=1.0) | 0.96 | improved | -- | 135 shorts disabled |
-| Buy-Hold | 0.35 | +21.0% | -- | |
-
-### ETH/USDT (Hourly, adaptive_hold=3, adaptive HS/NL/SL)
+### AAPL (Daily, adaptive_hold=10, joint_search, n_seeds=2, adaptive_mode)
 
 | Model | Sharpe | Return | Trades | Notes |
 |-------|--------|--------|--------|-------|
-| **GRU (regression)** | **3.66** | **+8.2%** | 11 | HS=32, NL=3, SL=20, stability=0.75 |
-| Buy-Hold | 0.46 | +1.0% | -- | |
+| **Transformer (regression)** | **0.37** | **+7.7%** | 11 | HS=128, NL=2, SL=30, stability=0.67 |
+| GRU (classification) | -0.35 | -5.3% | 10 | HS=128, NL=2, SL=30 |
+| LSTM (regression) | -0.73 | -18.2% | 6 | HS=128, NL=2, SL=50 |
+| Buy-Hold | 0.35-0.44 | +7-9% | -- | |
 
-### MSFT (Daily, adaptive_hold=2, adaptive HS/NL/SL)
-
-| Model | Sharpe | Return | Trades | Notes |
-|-------|--------|--------|--------|-------|
-| **Selective Ensemble** | **1.05** | **+64.9%** | -- | All 3 models positive |
-| **GRU (regime, thr=1.5)** | **1.08** | **+73.2%** | -- | 10 shorts disabled |
-| Transformer (regression) | 0.86 | +51.2% | 77 | HS=32, NL=2, SL=20 |
-| Buy-Hold | 1.01-1.05 | +65-70% | -- | |
-
-### SPY (Daily, adaptive_hold=3, adaptive HS/NL/SL)
+### SPY (Daily, adaptive_hold=1, joint_search, n_seeds=2, adaptive_mode)
 
 | Model | Sharpe | Return | Trades | Notes |
 |-------|--------|--------|--------|-------|
-| LSTM CLS | 0.76 | +29.7% | 9 | Classification beats regression |
-| Buy-Hold | 1.16 | +48.3% | -- | |
+| **LSTM (classification)** | **0.67** | **+15.9%** | 4 | HS=128, NL=1, SL=30, stability=1.0 |
+| GRU (classification) | 0.50 | +13.1% | 7 | HS=64, NL=1, SL=20, stability=1.0 |
+| Transformer (classification) | 0.18 | +5.3% | 41 | HS=128, NL=3, SL=50, stability=0.33 |
+| Ensemble (equal) | 0.98 | +33.3% | 1 | Matches buy-and-hold |
+| Buy-Hold | 0.98-1.16 | +33-48% | -- | |
 
-### Key Findings (Cycle 9):
-- **num_layers preferences are model-specific**: GRU prefers 3 layers across all tickers; Transformer prefers 1-2
-- **Selective ensemble works when all models are positive**: MSFT selective ensemble (1.05) matches full ensemble since all models contribute positively
-- **Results vary across data periods**: BTC went from Cycle 8 ensemble 7.10 to all-negative, confirming market-regime dependence
-- **AAPL Transformer achieves perfect stability** (3/3 positive windows) with shallow architecture (NL=1)
-- **Early stopping + warmup fix ensures proper Transformer training**: warmup phase is no longer interrupted
+### Key Findings (Cycle 10):
+- **Joint search selects larger hidden sizes (128)**: Different from Cycle 9 sequential sweeps which often selected 32. May indicate interaction effects between hyperparameters.
+- **Adaptive mode confirms SPY prefers classification**: All 3 SPY models select classification. AAPL is mixed (GRU=cls, LSTM/Transformer=reg).
+- **Multi-seed averaging at n=2 is modest**: Provides ~30% variance reduction. n=3-5 recommended for meaningful stability improvement.
+- **SPY LSTM (cls) achieves perfect stability**: 3/3 positive windows with shallow architecture (NL=1).
+- **Ensembles converge toward buy-and-hold**: SPY ensemble Sharpe 0.98 matches baseline, suggesting models learn long-bias rather than alpha.
 
-See `reports/cycle_9/` for full metrics and details.
+See `reports/cycle_10/` for full metrics and details.

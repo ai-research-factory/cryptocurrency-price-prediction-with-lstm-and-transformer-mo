@@ -11,6 +11,8 @@ Cycle 8: Added early stopping, ensemble fix, per-ticker regime threshold calibra
 per-model hidden size search.
 Cycle 9: Added selective ensemble (drop underperforming models), per-model
 num_layers search, fixed early stopping + warmup interaction.
+Cycle 10: Added multi-seed averaging, joint hyperparameter search,
+adaptive mode selection (classification vs regression per model/ticker).
 """
 
 import argparse
@@ -36,6 +38,9 @@ from .evaluation import (
     regime_threshold_sweep, select_optimal_regime_threshold,
     hidden_size_sweep, select_optimal_hidden_size,
     num_layers_sweep, select_optimal_num_layers,
+    walk_forward_validation_multiseed,
+    joint_hyperparam_search, select_optimal_joint_params,
+    mode_selection_sweep, select_optimal_mode,
 )
 
 logging.basicConfig(
@@ -208,7 +213,7 @@ def _build_ensemble_result(
 
 
 def run_experiment(config: dict) -> dict:
-    """Run full experiment pipeline with Cycle 9 enhancements."""
+    """Run full experiment pipeline with Cycle 10 enhancements."""
     data_cfg = config["data"]
     model_cfg = config["model"]
     train_cfg = config["training"]
@@ -250,6 +255,11 @@ def run_experiment(config: dict) -> dict:
     adaptive_num_layers = eval_cfg.get("adaptive_num_layers", False)
     selective_ensemble = eval_cfg.get("selective_ensemble", False)
     selective_ensemble_threshold = eval_cfg.get("selective_ensemble_threshold", 0.0)
+    # Cycle 10: new options
+    n_seeds = eval_cfg.get("n_seeds", 1)
+    joint_search = eval_cfg.get("joint_search", False)
+    joint_search_samples = eval_cfg.get("joint_search_samples", 12)
+    adaptive_mode = eval_cfg.get("adaptive_mode", False)
 
     all_ticker_results = {}
 
@@ -322,68 +332,28 @@ def run_experiment(config: dict) -> dict:
             else:
                 logger.info(f"Adaptive hold: sweep failed, using default min_hold={ticker_hold}")
 
-        # Cycle 8: Per-model adaptive hidden size selection
+        # Cycle 10: Joint hyperparameter search (replaces sequential sweeps)
         model_hidden_sizes = {}
-        if adaptive_hidden_size and hidden_size_levels:
+        model_num_layers = {}
+        model_seq_lens = {}
+        joint_search_results = {}
+
+        if joint_search and hidden_size_levels and num_layers_levels and seq_len_sweep_levels:
             for mtype in model_cfg["types"]:
                 logger.info(f"\n{'='*60}")
-                logger.info(f"Adaptive hidden_size: sweeping for {mtype.upper()} on {ticker}")
+                logger.info(f"Joint hyperparam search for {mtype.upper()} on {ticker}")
                 logger.info(f"{'='*60}")
-                mkwargs = model_cfg.get(mtype, {})
+                mkwargs = dict(model_cfg.get(mtype, {}))
                 mtype_warmup = warmup_epochs if mtype == "transformer" else 0
-                hs_sweep = hidden_size_sweep(
+                js_results = joint_hyperparam_search(
                     features=features,
                     targets=targets,
                     model_type=mtype,
                     model_kwargs=mkwargs,
                     hidden_size_levels=hidden_size_levels,
-                    seq_len=train_cfg.get("seq_len", 30),
-                    train_size=eval_cfg.get("train_size", 500),
-                    test_size=eval_cfg.get("test_size", 60),
-                    step_size=eval_cfg.get("step_size", 60),
-                    epochs=train_cfg.get("epochs", 50),
-                    batch_size=train_cfg.get("batch_size", 32),
-                    lr=train_cfg.get("lr", 1e-3),
-                    cost_bps=eval_cfg.get("cost_bps", 10.0),
-                    purge_gap=purge_gap,
-                    interval=interval,
-                    adaptive_window=adaptive_window,
-                    min_holding_period=ticker_hold,
-                    allow_short=allow_short,
-                    warmup_epochs=mtype_warmup,
-                    early_stopping_patience=early_stopping_patience,
-                )
-                optimal_hs = select_optimal_hidden_size(hs_sweep, 64)
-                model_hidden_sizes[mtype] = optimal_hs
-                model_hidden_sizes[f"{mtype}_sweep"] = hs_sweep
-                logger.info(f"Adaptive hidden_size: selected hidden_size={optimal_hs} for {mtype.upper()} on {ticker}")
-
-        # Cycle 9: Per-model adaptive num_layers selection
-        model_num_layers = {}
-        if adaptive_num_layers and num_layers_levels:
-            for mtype in model_cfg["types"]:
-                logger.info(f"\n{'='*60}")
-                logger.info(f"Adaptive num_layers: sweeping for {mtype.upper()} on {ticker}")
-                logger.info(f"{'='*60}")
-                mkwargs = dict(model_cfg.get(mtype, {}))
-                # Apply adaptive hidden size if already selected
-                if mtype in model_hidden_sizes:
-                    if mtype in ("lstm", "gru"):
-                        mkwargs["hidden_size"] = model_hidden_sizes[mtype]
-                    elif mtype == "transformer":
-                        nhead = mkwargs.get("nhead", 4)
-                        d_model = max(model_hidden_sizes[mtype], nhead)
-                        d_model = d_model - (d_model % nhead)
-                        mkwargs["d_model"] = d_model
-                        mkwargs["dim_feedforward"] = d_model * 2
-                mtype_warmup = warmup_epochs if mtype == "transformer" else 0
-                nl_sweep = num_layers_sweep(
-                    features=features,
-                    targets=targets,
-                    model_type=mtype,
-                    model_kwargs=mkwargs,
                     num_layers_levels=num_layers_levels,
-                    seq_len=train_cfg.get("seq_len", 30),
+                    seq_len_levels=seq_len_sweep_levels,
+                    n_samples=joint_search_samples,
                     train_size=eval_cfg.get("train_size", 500),
                     test_size=eval_cfg.get("test_size", 60),
                     step_size=eval_cfg.get("step_size", 60),
@@ -399,21 +369,151 @@ def run_experiment(config: dict) -> dict:
                     warmup_epochs=mtype_warmup,
                     early_stopping_patience=early_stopping_patience,
                 )
-                optimal_nl = select_optimal_num_layers(nl_sweep, 2)
-                model_num_layers[mtype] = optimal_nl
-                model_num_layers[f"{mtype}_sweep"] = nl_sweep
-                logger.info(f"Adaptive num_layers: selected num_layers={optimal_nl} for {mtype.upper()} on {ticker}")
+                defaults = {
+                    "hidden_size": model_cfg.get(mtype, {}).get("hidden_size",
+                                   model_cfg.get(mtype, {}).get("d_model", 64)),
+                    "num_layers": model_cfg.get(mtype, {}).get("num_layers", 2),
+                    "seq_len": train_cfg.get("seq_len", 30),
+                }
+                best = select_optimal_joint_params(js_results, defaults)
+                model_hidden_sizes[mtype] = best["hidden_size"]
+                model_num_layers[mtype] = best["num_layers"]
+                model_seq_lens[mtype] = best["seq_len"]
+                joint_search_results[mtype] = js_results
+                logger.info(f"Joint search: selected hs={best['hidden_size']}, "
+                            f"nl={best['num_layers']}, sl={best['seq_len']} "
+                            f"for {mtype.upper()} on {ticker}")
+        else:
+            # Fallback: sequential sweeps (Cycles 8-9 behavior)
+            if adaptive_hidden_size and hidden_size_levels:
+                for mtype in model_cfg["types"]:
+                    logger.info(f"\n{'='*60}")
+                    logger.info(f"Adaptive hidden_size: sweeping for {mtype.upper()} on {ticker}")
+                    logger.info(f"{'='*60}")
+                    mkwargs = model_cfg.get(mtype, {})
+                    mtype_warmup = warmup_epochs if mtype == "transformer" else 0
+                    hs_sweep = hidden_size_sweep(
+                        features=features,
+                        targets=targets,
+                        model_type=mtype,
+                        model_kwargs=mkwargs,
+                        hidden_size_levels=hidden_size_levels,
+                        seq_len=train_cfg.get("seq_len", 30),
+                        train_size=eval_cfg.get("train_size", 500),
+                        test_size=eval_cfg.get("test_size", 60),
+                        step_size=eval_cfg.get("step_size", 60),
+                        epochs=train_cfg.get("epochs", 50),
+                        batch_size=train_cfg.get("batch_size", 32),
+                        lr=train_cfg.get("lr", 1e-3),
+                        cost_bps=eval_cfg.get("cost_bps", 10.0),
+                        purge_gap=purge_gap,
+                        interval=interval,
+                        adaptive_window=adaptive_window,
+                        min_holding_period=ticker_hold,
+                        allow_short=allow_short,
+                        warmup_epochs=mtype_warmup,
+                        early_stopping_patience=early_stopping_patience,
+                    )
+                    optimal_hs = select_optimal_hidden_size(hs_sweep, 64)
+                    model_hidden_sizes[mtype] = optimal_hs
+                    model_hidden_sizes[f"{mtype}_sweep"] = hs_sweep
+                    logger.info(f"Adaptive hidden_size: selected hidden_size={optimal_hs} for {mtype.upper()} on {ticker}")
 
-        # Cycle 7: Per-model-ticker adaptive seq_len selection
-        # Phase 1: If adaptive_seq_len, run seq_len sweep first to find optimal per model
-        model_seq_lens = {}
-        if adaptive_seq_len and seq_len_sweep_levels:
+            if adaptive_num_layers and num_layers_levels:
+                for mtype in model_cfg["types"]:
+                    logger.info(f"\n{'='*60}")
+                    logger.info(f"Adaptive num_layers: sweeping for {mtype.upper()} on {ticker}")
+                    logger.info(f"{'='*60}")
+                    mkwargs = dict(model_cfg.get(mtype, {}))
+                    if mtype in model_hidden_sizes:
+                        if mtype in ("lstm", "gru"):
+                            mkwargs["hidden_size"] = model_hidden_sizes[mtype]
+                        elif mtype == "transformer":
+                            nhead = mkwargs.get("nhead", 4)
+                            d_model = max(model_hidden_sizes[mtype], nhead)
+                            d_model = d_model - (d_model % nhead)
+                            mkwargs["d_model"] = d_model
+                            mkwargs["dim_feedforward"] = d_model * 2
+                    mtype_warmup = warmup_epochs if mtype == "transformer" else 0
+                    nl_sweep = num_layers_sweep(
+                        features=features,
+                        targets=targets,
+                        model_type=mtype,
+                        model_kwargs=mkwargs,
+                        num_layers_levels=num_layers_levels,
+                        seq_len=train_cfg.get("seq_len", 30),
+                        train_size=eval_cfg.get("train_size", 500),
+                        test_size=eval_cfg.get("test_size", 60),
+                        step_size=eval_cfg.get("step_size", 60),
+                        epochs=train_cfg.get("epochs", 50),
+                        batch_size=train_cfg.get("batch_size", 32),
+                        lr=train_cfg.get("lr", 1e-3),
+                        cost_bps=eval_cfg.get("cost_bps", 10.0),
+                        purge_gap=purge_gap,
+                        interval=interval,
+                        adaptive_window=adaptive_window,
+                        min_holding_period=ticker_hold,
+                        allow_short=allow_short,
+                        warmup_epochs=mtype_warmup,
+                        early_stopping_patience=early_stopping_patience,
+                    )
+                    optimal_nl = select_optimal_num_layers(nl_sweep, 2)
+                    model_num_layers[mtype] = optimal_nl
+                    model_num_layers[f"{mtype}_sweep"] = nl_sweep
+                    logger.info(f"Adaptive num_layers: selected num_layers={optimal_nl} for {mtype.upper()} on {ticker}")
+
+            if adaptive_seq_len and seq_len_sweep_levels:
+                for mtype in model_cfg["types"]:
+                    logger.info(f"\n{'='*60}")
+                    logger.info(f"Adaptive seq_len: sweeping for {mtype.upper()} on {ticker}")
+                    logger.info(f"{'='*60}")
+                    mkwargs = dict(model_cfg.get(mtype, {}))
+                    if mtype in model_hidden_sizes:
+                        if mtype in ("lstm", "gru"):
+                            mkwargs["hidden_size"] = model_hidden_sizes[mtype]
+                        elif mtype == "transformer":
+                            nhead = mkwargs.get("nhead", 4)
+                            d_model = max(model_hidden_sizes[mtype], nhead)
+                            d_model = d_model - (d_model % nhead)
+                            mkwargs["d_model"] = d_model
+                            mkwargs["dim_feedforward"] = d_model * 2
+                    if mtype in model_num_layers:
+                        mkwargs["num_layers"] = model_num_layers[mtype]
+                    mtype_warmup = warmup_epochs if mtype == "transformer" else 0
+                    sl_sweep = seq_len_sensitivity_sweep(
+                        features=features,
+                        targets=targets,
+                        model_type=mtype,
+                        model_kwargs=mkwargs,
+                        seq_len_levels=seq_len_sweep_levels,
+                        train_size=eval_cfg.get("train_size", 500),
+                        test_size=eval_cfg.get("test_size", 60),
+                        step_size=eval_cfg.get("step_size", 60),
+                        epochs=train_cfg.get("epochs", 50),
+                        batch_size=train_cfg.get("batch_size", 32),
+                        lr=train_cfg.get("lr", 1e-3),
+                        cost_bps=eval_cfg.get("cost_bps", 10.0),
+                        purge_gap=purge_gap,
+                        interval=interval,
+                        adaptive_window=adaptive_window,
+                        min_holding_period=ticker_hold,
+                        allow_short=allow_short,
+                        warmup_epochs=mtype_warmup,
+                        early_stopping_patience=early_stopping_patience,
+                    )
+                    optimal_sl = select_optimal_seq_len(sl_sweep, train_cfg.get("seq_len", 30))
+                    model_seq_lens[mtype] = optimal_sl
+                    logger.info(f"Adaptive seq_len: selected seq_len={optimal_sl} for {mtype.upper()} on {ticker}")
+                    model_seq_lens[f"{mtype}_sweep"] = sl_sweep
+
+        # Cycle 10: Per-model adaptive mode selection
+        model_modes = {}
+        if adaptive_mode:
             for mtype in model_cfg["types"]:
                 logger.info(f"\n{'='*60}")
-                logger.info(f"Adaptive seq_len: sweeping for {mtype.upper()} on {ticker}")
+                logger.info(f"Adaptive mode: sweeping regression vs classification for {mtype.upper()} on {ticker}")
                 logger.info(f"{'='*60}")
                 mkwargs = dict(model_cfg.get(mtype, {}))
-                # Cycle 8: Apply adaptive hidden size if selected
                 if mtype in model_hidden_sizes:
                     if mtype in ("lstm", "gru"):
                         mkwargs["hidden_size"] = model_hidden_sizes[mtype]
@@ -423,17 +523,16 @@ def run_experiment(config: dict) -> dict:
                         d_model = d_model - (d_model % nhead)
                         mkwargs["d_model"] = d_model
                         mkwargs["dim_feedforward"] = d_model * 2
-                # Cycle 9: Apply adaptive num_layers if selected
                 if mtype in model_num_layers:
                     mkwargs["num_layers"] = model_num_layers[mtype]
-                # Determine warmup for this model type
+                mtype_seq_len = model_seq_lens.get(mtype, train_cfg.get("seq_len", 30))
                 mtype_warmup = warmup_epochs if mtype == "transformer" else 0
-                sl_sweep = seq_len_sensitivity_sweep(
+                ms_results = mode_selection_sweep(
                     features=features,
                     targets=targets,
                     model_type=mtype,
                     model_kwargs=mkwargs,
-                    seq_len_levels=seq_len_sweep_levels,
+                    seq_len=mtype_seq_len,
                     train_size=eval_cfg.get("train_size", 500),
                     test_size=eval_cfg.get("test_size", 60),
                     step_size=eval_cfg.get("step_size", 60),
@@ -449,20 +548,25 @@ def run_experiment(config: dict) -> dict:
                     warmup_epochs=mtype_warmup,
                     early_stopping_patience=early_stopping_patience,
                 )
-                optimal_sl = select_optimal_seq_len(sl_sweep, train_cfg.get("seq_len", 30))
-                model_seq_lens[mtype] = optimal_sl
-                logger.info(f"Adaptive seq_len: selected seq_len={optimal_sl} for {mtype.upper()} on {ticker}")
-                # Store sweep results for reporting
-                model_seq_lens[f"{mtype}_sweep"] = sl_sweep
+                use_cls = select_optimal_mode(ms_results)
+                model_modes[mtype] = use_cls
+                model_modes[f"{mtype}_sweep"] = ms_results
+                mode_label = "classification" if use_cls else "regression"
+                logger.info(f"Adaptive mode: selected {mode_label} for {mtype.upper()} on {ticker}")
 
-        # Run regression mode for all model types
+        # Run models (regression or adaptive mode) with optional multi-seed
         for mtype in model_cfg["types"]:
+            # Cycle 10: Determine mode from adaptive mode selection
+            mtype_cls = model_modes.get(mtype, False) if adaptive_mode else False
+            mode_label = "classification" if mtype_cls else "regression"
             logger.info(f"\n{'='*60}")
-            logger.info(f"Running walk-forward validation for {mtype.upper()} (regression) on {ticker}")
+            logger.info(f"Running walk-forward for {mtype.upper()} ({mode_label}) on {ticker}")
             logger.info(f"{'='*60}")
 
             mkwargs = dict(model_cfg.get(mtype, {}))
-            # Cycle 8: Apply adaptive hidden size if selected
+            if mtype_cls:
+                mkwargs["classification"] = True
+            # Apply adaptive hidden size if selected
             if mtype in model_hidden_sizes:
                 if mtype in ("lstm", "gru"):
                     mkwargs["hidden_size"] = model_hidden_sizes[mtype]
@@ -473,19 +577,19 @@ def run_experiment(config: dict) -> dict:
                     mkwargs["d_model"] = d_model
                     mkwargs["dim_feedforward"] = d_model * 2
                 logger.info(f"  Using adaptive hidden_size={model_hidden_sizes[mtype]} for {mtype.upper()}")
-            # Cycle 9: Apply adaptive num_layers if selected
+            # Apply adaptive num_layers if selected
             if mtype in model_num_layers:
                 mkwargs["num_layers"] = model_num_layers[mtype]
                 logger.info(f"  Using adaptive num_layers={model_num_layers[mtype]} for {mtype.upper()}")
-            # Cycle 7: Use per-model optimal seq_len if adaptive
             mtype_seq_len = model_seq_lens.get(mtype, train_cfg.get("seq_len", 30))
-            # Cycle 7: Transformer gets warm-up epochs
             mtype_warmup = warmup_epochs if mtype == "transformer" else 0
 
             if mtype in model_seq_lens:
                 logger.info(f"  Using adaptive seq_len={mtype_seq_len} for {mtype.upper()}")
 
-            result = walk_forward_validation(
+            # Cycle 10: Use multi-seed averaging if n_seeds > 1
+            wf_func = walk_forward_validation_multiseed if n_seeds > 1 else walk_forward_validation
+            wf_kwargs = dict(
                 features=features,
                 targets=targets,
                 model_type=mtype,
@@ -504,18 +608,32 @@ def run_experiment(config: dict) -> dict:
                 cost_sensitivity_levels=cost_sensitivity_levels,
                 min_holding_period=ticker_hold,
                 allow_short=allow_short,
-                classification=False,
+                classification=mtype_cls,
                 min_hold_sweep_levels=min_hold_sweep_levels,
                 warmup_epochs=mtype_warmup,
                 early_stopping_patience=early_stopping_patience,
             )
+            if n_seeds > 1:
+                wf_kwargs["n_seeds"] = n_seeds
+                logger.info(f"  Using multi-seed averaging with {n_seeds} seeds")
+
+            result = wf_func(**wf_kwargs)
             model_results[mtype] = result
+
+            # Store joint search results if available
+            if mtype in joint_search_results:
+                result["joint_search"] = joint_search_results[mtype]
+            # Store mode sweep results
+            if f"{mtype}_sweep" in model_modes:
+                result["mode_sweep"] = model_modes[f"{mtype}_sweep"]
+            if adaptive_mode:
+                result["adaptive_mode"] = mode_label
 
             # Store seq_len sweep results (from adaptive phase or run fresh)
             if f"{mtype}_sweep" in model_seq_lens:
                 result["seq_len_sweep"] = model_seq_lens[f"{mtype}_sweep"]
                 result["adaptive_seq_len"] = mtype_seq_len
-            elif seq_len_sweep_levels and not adaptive_seq_len:
+            elif seq_len_sweep_levels and not adaptive_seq_len and not joint_search:
                 logger.info(f"  Running seq_len sweep for {mtype.upper()} on {ticker}")
                 sl_sweep = seq_len_sensitivity_sweep(
                     features=features,
@@ -570,7 +688,8 @@ def run_experiment(config: dict) -> dict:
                     result["optimal_regime_threshold"] = optimal_threshold
 
         # Cycle 5: Run classification mode for comparison
-        if classification:
+        # Cycle 10: Skip if adaptive_mode is enabled (mode already selected above)
+        if classification and not adaptive_mode:
             for mtype in model_cfg["types"]:
                 logger.info(f"\n{'='*60}")
                 logger.info(f"Running walk-forward for {mtype.upper()} (classification) on {ticker}")
@@ -721,6 +840,11 @@ def run_experiment(config: dict) -> dict:
         adaptive_num_layers_map = {m: nl for m, nl in model_num_layers.items()
                                     if not m.endswith("_sweep")} if model_num_layers else None
 
+        # Cycle 10: Collect adaptive mode selections
+        adaptive_modes_map = {m: ("classification" if v else "regression")
+                              for m, v in model_modes.items()
+                              if not str(m).endswith("_sweep")} if model_modes else None
+
         all_ticker_results[ticker] = {
             "n_samples": len(combined),
             "n_features": len(feature_cols),
@@ -732,6 +856,9 @@ def run_experiment(config: dict) -> dict:
             "adaptive_seq_lens": adaptive_seq_lens,
             "adaptive_hidden_sizes": adaptive_hidden_sizes,
             "adaptive_num_layers": adaptive_num_layers_map,
+            "adaptive_modes": adaptive_modes_map,
+            "joint_search": bool(joint_search_results),
+            "n_seeds": n_seeds if n_seeds > 1 else None,
             "results": model_results,
             "feature_importance": feat_importance if feat_importance else None,
         }
@@ -743,7 +870,7 @@ def run_experiment(config: dict) -> dict:
     }
 
 
-def save_results(experiment: dict, output_dir: str = "reports/cycle_9"):
+def save_results(experiment: dict, output_dir: str = "reports/cycle_10"):
     """Save experiment results for all tickers."""
     out = Path(output_dir)
     out.mkdir(parents=True, exist_ok=True)
@@ -799,6 +926,15 @@ def save_results(experiment: dict, output_dir: str = "reports/cycle_9"):
             if "selective" in result:
                 model_metrics["selective"] = result["selective"]
                 model_metrics["excluded_models"] = result.get("excluded_models", [])
+            # Cycle 10 fields
+            if "n_seeds" in result:
+                model_metrics["n_seeds"] = result["n_seeds"]
+            if "joint_search" in result:
+                model_metrics["joint_search"] = result["joint_search"]
+            if "mode_sweep" in result:
+                model_metrics["mode_sweep"] = result["mode_sweep"]
+            if "adaptive_mode" in result:
+                model_metrics["adaptive_mode"] = result["adaptive_mode"]
             ticker_metrics["models"][model_name] = model_metrics
 
         # Cycle 4: Feature importance
@@ -821,6 +957,14 @@ def save_results(experiment: dict, output_dir: str = "reports/cycle_9"):
         if ticker_data.get("adaptive_num_layers"):
             ticker_metrics["adaptive_num_layers"] = ticker_data["adaptive_num_layers"]
 
+        # Cycle 10: Adaptive modes, joint search, multi-seed
+        if ticker_data.get("adaptive_modes"):
+            ticker_metrics["adaptive_modes"] = ticker_data["adaptive_modes"]
+        if ticker_data.get("joint_search"):
+            ticker_metrics["joint_search"] = True
+        if ticker_data.get("n_seeds"):
+            ticker_metrics["n_seeds"] = ticker_data["n_seeds"]
+
         metrics["per_ticker"][ticker] = ticker_metrics
 
     with open(out / "metrics.json", "w") as f:
@@ -838,12 +982,12 @@ def main():
     config = load_config(args.config)
     experiment = run_experiment(config)
 
-    output_dir = args.output_dir or "reports/cycle_9"
+    output_dir = args.output_dir or "reports/cycle_10"
     save_results(experiment, output_dir=output_dir)
 
     # Print summary
     print("\n" + "=" * 70)
-    print("EXPERIMENT SUMMARY (Cycle 9)")
+    print("EXPERIMENT SUMMARY (Cycle 10)")
     print("=" * 70)
     for ticker, ticker_data in experiment["ticker_results"].items():
         print(f"\n{'─'*70}")
@@ -862,9 +1006,20 @@ def main():
         if ticker_data.get("adaptive_num_layers"):
             nl_parts = [f"{m}={nl}" for m, nl in ticker_data["adaptive_num_layers"].items()]
             adaptive_nl_str = f", adaptive_layers=[{', '.join(nl_parts)}]"
+        adaptive_mode_str = ""
+        if ticker_data.get("adaptive_modes"):
+            mode_parts = [f"{m}={md}" for m, md in ticker_data["adaptive_modes"].items()]
+            adaptive_mode_str = f", adaptive_mode=[{', '.join(mode_parts)}]"
+        seeds_str = ""
+        if ticker_data.get("n_seeds"):
+            seeds_str = f", n_seeds={ticker_data['n_seeds']}"
+        joint_str = ""
+        if ticker_data.get("joint_search"):
+            joint_str = ", joint_search=true"
         print(f"Ticker: {ticker} ({ticker_data['n_samples']} samples, "
               f"{ticker_data['n_features']} features, interval={ticker_data.get('interval', '1d')}"
-              f"{adaptive_hold_str}{adaptive_sl_str}{adaptive_hs_str}{adaptive_nl_str})")
+              f"{adaptive_hold_str}{adaptive_sl_str}{adaptive_hs_str}{adaptive_nl_str}"
+              f"{adaptive_mode_str}{seeds_str}{joint_str})")
         print(f"{'─'*70}")
         for model_name, result in ticker_data["results"].items():
             if "error" in result:

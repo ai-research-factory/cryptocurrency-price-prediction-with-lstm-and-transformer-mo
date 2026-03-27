@@ -53,14 +53,22 @@
 - ~~**num_layers search (#6):** Implemented per-model num_layers sweep [1, 2, 3]. GRU consistently prefers 3 layers across all tickers. Transformer prefers 1-2 layers. LSTM is mixed (1-3). No universal depth preference; confirms value of per-model-ticker adaptation.~~
 - ~~**Early stopping + warmup interaction (#7):** Fixed by skipping early stopping checks during warmup phase (epoch < warmup_epochs). Transformer now always completes warmup before early stopping can trigger.~~
 
+## Addressed in Cycle 10
+
+- ~~**Result instability across cycles (#1):** Multi-seed averaging (n_seeds=2) introduced to reduce initialization variance. Modest impact at n=2; higher seed counts (3-5) recommended for meaningful variance reduction.~~
+- ~~**Cross-validated sweep efficiency (#2):** Joint hyperparameter search replaces sequential sweeps. 6 random samples from the (hidden_size x num_layers x seq_len) space instead of 30 sequential evaluations. Reduces compute by ~50% but may miss optima.~~
+- ~~**Classification vs regression on SPY (#4):** Adaptive mode selection per model/ticker implemented. SPY correctly selects classification for all 3 models; AAPL shows heterogeneity (GRU=classification, LSTM/Transformer=regression). Validates per-model-ticker mode selection.~~
+
 ## Remaining
 
-1. **Result instability across cycles:** BTC/USDT results vary dramatically between cycles (Cycle 8 ensemble Sharpe 7.10 vs Cycle 9 all-negative). Different API data fetch periods produce different results, indicating models are fitting to specific market regimes rather than learning generalizable patterns.
+1. **Statistical significance gap:** After 10 cycles, no model achieves statistically significant outperformance vs buy-and-hold (p < 0.05). Walk-forward window count (3) limits statistical power. Increasing data periods or using more granular intervals could help.
 
-2. **Cross-validated sweep efficiency (#3):** With num_layers sweep added, the total pre-experiment sweeps are now 30 full walk-forwards per ticker (hidden_size=9, num_layers=9, seq_len=12). A lighter inner validation loop or joint search would reduce the multiplicative cost.
+2. **Joint search budget too small:** 6 samples from 36 combinations leaves 83% of the space unexplored. Consider increasing `joint_search_samples` to 12+ or using Bayesian optimization for more efficient exploration.
 
-3. **Statistical significance gap (#4):** After 9 cycles and 5 tickers, no model achieves statistical significance of outperformance vs buy-and-hold (p < 0.05). SPY models achieve p < 0.05 but indicate significant underperformance. Walk-forward window count (3-4) limits statistical power.
+3. **Multi-seed averaging needs higher n:** n_seeds=2 provides only ~30% variance reduction (1/sqrt(2)). Increasing to 3-5 would be more effective but proportionally increases compute. An adaptive scheme (run more seeds for high-variance models) could balance cost and benefit.
 
-4. **Classification vs regression on SPY:** SPY classification models (LSTM CLS Sharpe 0.76, Transformer CLS 0.35) outperform all regression models in Cycle 9. This contradicts the Cycle 5 finding that regression is universally better. May warrant per-ticker mode selection.
+4. **Selective ensemble limited by model count:** With 3 model types and varying per-ticker performance, selective ensemble often has insufficient models above threshold. Adding more model architectures (e.g., TCN, attention-LSTM) or lowering threshold could help.
 
-5. **Selective ensemble limitations:** With threshold=0.0, most tickers have insufficient positive models to form a selective ensemble. A negative threshold (e.g., -0.5) would allow more models but defeat the purpose. Need more model types or a dynamic threshold based on market conditions.
+5. **Ticker coverage reduced:** Cycle 10 default config only evaluates 2 tickers (AAPL, SPY) vs 5 in Cycle 9. Restoring BTC/USDT, ETH/USDT, and MSFT would provide broader validation of the new features.
+
+6. **Ensemble approaches buy-and-hold:** SPY ensemble Sharpe (~0.98) closely matches buy-and-hold baseline. The models are learning to approximate a long-only position rather than providing alpha. Alternative loss functions (e.g., Sharpe-aware loss) or additional features (macro indicators, sentiment) may be needed to generate genuine excess returns.

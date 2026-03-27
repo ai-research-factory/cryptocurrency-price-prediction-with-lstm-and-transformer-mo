@@ -18,6 +18,10 @@ Cycle 8: Added regime threshold calibration sweep, hidden size search,
 early stopping support.
 
 Cycle 9: Added num_layers search, selective ensemble (drop underperformers).
+
+Cycle 10: Added multi-seed averaging for prediction stability,
+joint hyperparameter search replacing multiplicative grid,
+and adaptive mode selection (classification vs regression per model/ticker).
 """
 
 import logging
@@ -1034,3 +1038,420 @@ def select_optimal_num_layers(
         return default_num_layers
     best = max(valid, key=lambda r: r["sharpe_ratio"])
     return best["num_layers"]
+
+
+def walk_forward_validation_multiseed(
+    features: np.ndarray,
+    targets: np.ndarray,
+    model_type: str,
+    model_kwargs: dict,
+    seq_len: int = 30,
+    train_size: int = 500,
+    test_size: int = 60,
+    step_size: int = 60,
+    epochs: int = 50,
+    batch_size: int = 32,
+    lr: float = 1e-3,
+    cost_bps: float = 10.0,
+    device: str = "cpu",
+    purge_gap: int = 0,
+    interval: str = "1d",
+    adaptive_window: bool = False,
+    cost_sensitivity_levels: Optional[list[float]] = None,
+    min_holding_period: int = 1,
+    allow_short: bool = False,
+    classification: bool = False,
+    min_hold_sweep_levels: Optional[list[int]] = None,
+    warmup_epochs: int = 0,
+    early_stopping_patience: int = 0,
+    n_seeds: int = 3,
+) -> dict:
+    """Walk-forward validation with multi-seed prediction averaging.
+
+    Cycle 10: Trains each window N times with different random seeds and
+    averages predictions to reduce initialization variance. This addresses
+    the result instability observed across cycles (OQ#1).
+    """
+    import torch
+
+    n = len(features)
+
+    if adaptive_window:
+        train_size, test_size, step_size = _compute_adaptive_window_sizes(
+            n, seq_len, min_train_size=200, min_test_size=30, min_windows=3,
+        )
+        logger.info(
+            f"Adaptive window: train={train_size}, test={test_size}, step={step_size}"
+        )
+
+    all_preds = []
+    all_actuals = []
+    window_metrics = []
+    window_idx = 0
+
+    start = 0
+    while start + train_size + purge_gap + test_size + seq_len <= n:
+        train_end = start + train_size
+        test_start = train_end + purge_gap
+        test_end = test_start + test_size
+
+        train_features = features[start:train_end]
+        train_targets = targets[start:train_end]
+        test_features = features[test_start:test_end]
+        test_targets = targets[test_start:test_end]
+
+        window_features = np.vstack([train_features, test_features])
+        window_targets = np.concatenate([train_targets, test_targets])
+
+        train_ds, test_ds, _, pred_offset = prepare_data(
+            window_features, window_targets, train_size, seq_len,
+            classification=classification,
+        )
+
+        if len(test_ds) == 0:
+            start += step_size
+            continue
+
+        # Multi-seed: train N models and average predictions
+        seed_preds = []
+        for seed in range(n_seeds):
+            torch.manual_seed(seed * 1000 + window_idx)
+            np.random.seed(seed * 1000 + window_idx)
+
+            model = build_model(model_type, features.shape[1], **model_kwargs)
+            train_model(
+                model, train_ds, epochs=epochs, batch_size=batch_size, lr=lr,
+                device=device, classification=classification,
+                warmup_epochs=warmup_epochs,
+                early_stopping_patience=early_stopping_patience,
+            )
+            preds = predict(model, test_ds, device=device)
+            seed_preds.append(preds)
+
+        # Average predictions across seeds
+        preds = np.mean(seed_preds, axis=0)
+        actuals = window_targets[train_size + seq_len : train_size + seq_len + len(preds)]
+
+        w_metrics = compute_trading_metrics(
+            preds, actuals, cost_bps, interval, min_holding_period,
+            allow_short=allow_short, classification=classification,
+        )
+        w_metrics["window"] = window_idx
+        window_metrics.append(w_metrics)
+
+        all_preds.extend(preds.tolist())
+        all_actuals.extend(actuals.tolist())
+
+        logger.info(
+            f"Window {window_idx} (multiseed={n_seeds}): Sharpe={w_metrics['sharpe_ratio']:.3f}, "
+            f"Return={w_metrics['total_return']:.4f}"
+        )
+
+        start += step_size
+        window_idx += 1
+
+    if not all_preds:
+        return {"error": "No valid windows"}
+
+    all_preds = np.array(all_preds)
+    all_actuals = np.array(all_actuals)
+
+    agg_metrics = compute_trading_metrics(
+        all_preds, all_actuals, cost_bps, interval, min_holding_period,
+        allow_short=allow_short, classification=classification,
+    )
+    baseline_metrics = compute_naive_baseline(all_actuals, cost_bps, interval)
+
+    if classification:
+        if allow_short:
+            position = np.where(all_preds > 0.5, 1.0, -1.0)
+        else:
+            position = (all_preds > 0.5).astype(float)
+    else:
+        if allow_short:
+            position = np.sign(all_preds)
+        else:
+            position = (all_preds > 0).astype(float)
+    position = _apply_min_holding_period(position, min_holding_period)
+    cost = cost_bps / 10_000
+    trades = np.abs(np.diff(position, prepend=0))
+    strategy_returns = position * all_actuals - trades * cost
+    significance = compute_significance_vs_baseline(strategy_returns, all_actuals)
+
+    positive_windows = sum(1 for w in window_metrics if w["sharpe_ratio"] > 0)
+    stability = positive_windows / max(len(window_metrics), 1)
+
+    window_sharpes = [w["sharpe_ratio"] for w in window_metrics]
+    sharpe_stats = {
+        "mean": float(np.mean(window_sharpes)),
+        "std": float(np.std(window_sharpes)),
+        "min": float(np.min(window_sharpes)),
+        "max": float(np.max(window_sharpes)),
+    }
+
+    cost_sensitivity = None
+    if cost_sensitivity_levels:
+        cost_sensitivity = cost_sensitivity_analysis(
+            all_preds, all_actuals, cost_sensitivity_levels, interval,
+            min_holding_period, allow_short=allow_short, classification=classification,
+        )
+
+    hold_sweep = None
+    if min_hold_sweep_levels:
+        hold_sweep = min_holding_period_sweep(
+            all_preds, all_actuals, min_hold_sweep_levels, cost_bps, interval,
+            allow_short=allow_short, classification=classification,
+        )
+
+    result = {
+        "model_type": model_type,
+        "n_seeds": n_seeds,
+        "aggregate": agg_metrics,
+        "baseline_buy_hold": baseline_metrics,
+        "significance_vs_baseline": significance,
+        "stability_ratio": float(stability),
+        "n_windows": len(window_metrics),
+        "positive_windows": positive_windows,
+        "window_sharpe_stats": sharpe_stats,
+        "window_details": window_metrics,
+        "all_predictions": all_preds.tolist(),
+        "all_actuals": all_actuals.tolist(),
+        "walk_forward_config": {
+            "train_size": train_size,
+            "test_size": test_size,
+            "step_size": step_size,
+            "purge_gap": purge_gap,
+            "adaptive_window": adaptive_window,
+            "interval": interval,
+            "annualization_factor": get_annualization_factor(interval),
+            "min_holding_period": min_holding_period,
+            "allow_short": allow_short,
+            "classification": classification,
+            "n_seeds": n_seeds,
+        },
+    }
+    if cost_sensitivity is not None:
+        result["cost_sensitivity"] = cost_sensitivity
+    if hold_sweep is not None:
+        result["min_hold_sweep"] = hold_sweep
+
+    return result
+
+
+def joint_hyperparam_search(
+    features: np.ndarray,
+    targets: np.ndarray,
+    model_type: str,
+    model_kwargs: dict,
+    hidden_size_levels: list[int],
+    num_layers_levels: list[int],
+    seq_len_levels: list[int],
+    n_samples: int = 12,
+    train_size: int = 500,
+    test_size: int = 60,
+    step_size: int = 60,
+    epochs: int = 50,
+    batch_size: int = 32,
+    lr: float = 1e-3,
+    cost_bps: float = 10.0,
+    device: str = "cpu",
+    purge_gap: int = 0,
+    interval: str = "1d",
+    adaptive_window: bool = False,
+    min_holding_period: int = 1,
+    allow_short: bool = False,
+    warmup_epochs: int = 0,
+    early_stopping_patience: int = 0,
+    random_seed: int = 42,
+) -> list[dict]:
+    """Joint random search over (hidden_size, num_layers, seq_len).
+
+    Cycle 10: Replaces multiplicative grid search (3×3×4=36 evaluations)
+    with a random sample of n_samples configurations from the joint space.
+    This reduces computational cost while exploring diverse combinations.
+    """
+    import itertools
+    rng = np.random.RandomState(random_seed)
+
+    # Generate full grid and sample
+    all_combos = list(itertools.product(hidden_size_levels, num_layers_levels, seq_len_levels))
+    if n_samples >= len(all_combos):
+        sampled = all_combos
+    else:
+        indices = rng.choice(len(all_combos), size=n_samples, replace=False)
+        sampled = [all_combos[i] for i in indices]
+
+    logger.info(f"  Joint search: {len(sampled)} configs from {len(all_combos)} total "
+                f"for {model_type}")
+
+    results = []
+    for hs, nl, sl in sampled:
+        mkwargs = dict(model_kwargs)
+        mkwargs["num_layers"] = nl
+        if model_type in ("lstm", "gru"):
+            mkwargs["hidden_size"] = hs
+        elif model_type == "transformer":
+            nhead = mkwargs.get("nhead", 4)
+            d_model = max(hs, nhead)
+            d_model = d_model - (d_model % nhead)
+            mkwargs["d_model"] = d_model
+            mkwargs["dim_feedforward"] = d_model * 2
+
+        wf_result = walk_forward_validation(
+            features=features,
+            targets=targets,
+            model_type=model_type,
+            model_kwargs=mkwargs,
+            seq_len=sl,
+            train_size=train_size,
+            test_size=test_size,
+            step_size=step_size,
+            epochs=epochs,
+            batch_size=batch_size,
+            lr=lr,
+            cost_bps=cost_bps,
+            device=device,
+            purge_gap=purge_gap,
+            interval=interval,
+            adaptive_window=adaptive_window,
+            min_holding_period=min_holding_period,
+            allow_short=allow_short,
+            warmup_epochs=warmup_epochs,
+            early_stopping_patience=early_stopping_patience,
+        )
+        if "error" in wf_result:
+            results.append({
+                "hidden_size": hs,
+                "num_layers": nl,
+                "seq_len": sl,
+                "error": wf_result["error"],
+            })
+        else:
+            agg = wf_result["aggregate"]
+            results.append({
+                "hidden_size": hs,
+                "num_layers": nl,
+                "seq_len": sl,
+                "sharpe_ratio": agg["sharpe_ratio"],
+                "sortino_ratio": agg["sortino_ratio"],
+                "total_return": agg["total_return"],
+                "n_trades": agg["n_trades"],
+                "n_windows": wf_result["n_windows"],
+                "stability_ratio": wf_result.get("stability_ratio", 0),
+            })
+        logger.info(f"    hs={hs}, nl={nl}, sl={sl} → "
+                     f"Sharpe={results[-1].get('sharpe_ratio', 'err')}")
+
+    return results
+
+
+def select_optimal_joint_params(
+    search_results: list[dict],
+    defaults: dict,
+) -> dict:
+    """Select the best (hidden_size, num_layers, seq_len) from joint search.
+
+    Cycle 10: Returns dict with 'hidden_size', 'num_layers', 'seq_len'.
+    """
+    valid = [r for r in search_results if "sharpe_ratio" in r and "error" not in r]
+    if not valid:
+        return defaults
+    best = max(valid, key=lambda r: r["sharpe_ratio"])
+    return {
+        "hidden_size": best["hidden_size"],
+        "num_layers": best["num_layers"],
+        "seq_len": best["seq_len"],
+    }
+
+
+def mode_selection_sweep(
+    features: np.ndarray,
+    targets: np.ndarray,
+    model_type: str,
+    model_kwargs: dict,
+    seq_len: int = 30,
+    train_size: int = 500,
+    test_size: int = 60,
+    step_size: int = 60,
+    epochs: int = 50,
+    batch_size: int = 32,
+    lr: float = 1e-3,
+    cost_bps: float = 10.0,
+    device: str = "cpu",
+    purge_gap: int = 0,
+    interval: str = "1d",
+    adaptive_window: bool = False,
+    min_holding_period: int = 1,
+    allow_short: bool = False,
+    warmup_epochs: int = 0,
+    early_stopping_patience: int = 0,
+) -> list[dict]:
+    """Compare regression vs classification for a given model/ticker.
+
+    Cycle 10: Addresses OQ#4 -- SPY classification outperforming regression
+    contradicts the Cycle 5 finding. This sweep allows per-ticker mode selection.
+    """
+    results = []
+    for mode_cls in [False, True]:
+        mode_label = "classification" if mode_cls else "regression"
+        logger.info(f"  Mode sweep: testing {mode_label} for {model_type}")
+        mkwargs = dict(model_kwargs)
+        if mode_cls:
+            mkwargs["classification"] = True
+
+        wf_result = walk_forward_validation(
+            features=features,
+            targets=targets,
+            model_type=model_type,
+            model_kwargs=mkwargs,
+            seq_len=seq_len,
+            train_size=train_size,
+            test_size=test_size,
+            step_size=step_size,
+            epochs=epochs,
+            batch_size=batch_size,
+            lr=lr,
+            cost_bps=cost_bps,
+            device=device,
+            purge_gap=purge_gap,
+            interval=interval,
+            adaptive_window=adaptive_window,
+            min_holding_period=min_holding_period,
+            allow_short=allow_short,
+            classification=mode_cls,
+            warmup_epochs=warmup_epochs,
+            early_stopping_patience=early_stopping_patience,
+        )
+        if "error" in wf_result:
+            results.append({
+                "mode": mode_label,
+                "classification": mode_cls,
+                "error": wf_result["error"],
+            })
+        else:
+            agg = wf_result["aggregate"]
+            results.append({
+                "mode": mode_label,
+                "classification": mode_cls,
+                "sharpe_ratio": agg["sharpe_ratio"],
+                "sortino_ratio": agg["sortino_ratio"],
+                "total_return": agg["total_return"],
+                "n_trades": agg["n_trades"],
+                "n_windows": wf_result["n_windows"],
+                "stability_ratio": wf_result.get("stability_ratio", 0),
+            })
+    return results
+
+
+def select_optimal_mode(
+    sweep_results: list[dict],
+) -> bool:
+    """Select regression or classification based on Sharpe.
+
+    Returns True if classification is better, False for regression.
+    """
+    valid = [r for r in sweep_results if "sharpe_ratio" in r and "error" not in r]
+    if not valid:
+        return False
+    best = max(valid, key=lambda r: r["sharpe_ratio"])
+    return best["classification"]
